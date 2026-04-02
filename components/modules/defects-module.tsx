@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   Bar,
   BarChart,
@@ -25,6 +25,12 @@ import {
 } from "@/lib/format";
 import { initialDefectAnalyses } from "@/lib/mock-data";
 import { exportElementToPdf } from "@/lib/pdf";
+import {
+  areStringFiltersEqual,
+  clearInvalidRelationalSelections,
+  getRelationalOptions,
+  type RelationalFieldConfig,
+} from "@/lib/relational-filters";
 import type { DefectAnalysis, DefectItem } from "@/types/domain";
 
 const chartColors = ["#355c4b", "#c2703d", "#8f9b62", "#d7b377", "#63784e"];
@@ -41,6 +47,36 @@ const createEmptyForm = (): Omit<DefectAnalysis, "id"> => ({
   observations: "",
 });
 
+type DefectRelationalFilters = {
+  client: string;
+  product: string;
+  defect: string;
+  processCode: string;
+};
+
+const defectFilterConfig: Record<
+  keyof DefectRelationalFilters,
+  RelationalFieldConfig<DefectAnalysis>
+> = {
+  client: {
+    getValues: (analysis) => [analysis.client],
+    matches: (analysis, value) => analysis.client === value,
+  },
+  product: {
+    getValues: (analysis) => [analysis.product],
+    matches: (analysis, value) => analysis.product === value,
+  },
+  defect: {
+    getValues: (analysis) => analysis.defects.map((defect) => defect.name),
+    matches: (analysis, value) =>
+      analysis.defects.some((defect) => defect.name === value),
+  },
+  processCode: {
+    getValues: (analysis) => [analysis.processCode],
+    matches: (analysis, value) => analysis.processCode === value,
+  },
+};
+
 export const DefectsModule = () => {
   const [analyses, setAnalyses] = useState(initialDefectAnalyses);
   const [filters, setFilters] = useState({
@@ -56,20 +92,82 @@ export const DefectsModule = () => {
   const [isPending, startTransition] = useTransition();
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const clientOptions = Array.from(
-    new Set(analyses.map((analysis) => analysis.client)),
-  ).sort();
-  const productOptions = Array.from(
-    new Set(analyses.map((analysis) => analysis.product)),
-  ).sort();
-  const processOptions = Array.from(
-    new Set(analyses.map((analysis) => analysis.processCode)),
-  ).sort();
-  const defectOptions = Array.from(
-    new Set(
-      analyses.flatMap((analysis) => analysis.defects.map((defect) => defect.name)),
-    ),
-  ).sort();
+  const relationalFilters: DefectRelationalFilters = {
+    client: filters.client,
+    product: filters.product,
+    defect: filters.defect,
+    processCode: filters.processCode,
+  };
+
+  const matchesDateRange = (analysis: DefectAnalysis, from: string, to: string) => {
+    const matchesFrom = !from || analysis.analysisDate >= from;
+    const matchesTo = !to || analysis.analysisDate <= to;
+
+    return matchesFrom && matchesTo;
+  };
+
+  const clientOptions = getRelationalOptions(
+    analyses,
+    relationalFilters,
+    "client",
+    defectFilterConfig,
+    (analysis) => matchesDateRange(analysis, filters.from, filters.to),
+  );
+  const productOptions = getRelationalOptions(
+    analyses,
+    relationalFilters,
+    "product",
+    defectFilterConfig,
+    (analysis) => matchesDateRange(analysis, filters.from, filters.to),
+  );
+  const defectOptions = getRelationalOptions(
+    analyses,
+    relationalFilters,
+    "defect",
+    defectFilterConfig,
+    (analysis) => matchesDateRange(analysis, filters.from, filters.to),
+  );
+  const processOptions = getRelationalOptions(
+    analyses,
+    relationalFilters,
+    "processCode",
+    defectFilterConfig,
+    (analysis) => matchesDateRange(analysis, filters.from, filters.to),
+  );
+
+  useEffect(() => {
+    setFilters((current) => {
+      const currentRelational: DefectRelationalFilters = {
+        client: current.client,
+        product: current.product,
+        defect: current.defect,
+        processCode: current.processCode,
+      };
+      const sanitizedRelational = clearInvalidRelationalSelections(
+        analyses,
+        currentRelational,
+        defectFilterConfig,
+        (analysis) => matchesDateRange(analysis, current.from, current.to),
+      );
+
+      if (areStringFiltersEqual(currentRelational, sanitizedRelational)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        ...sanitizedRelational,
+      };
+    });
+  }, [
+    analyses,
+    filters.client,
+    filters.product,
+    filters.defect,
+    filters.processCode,
+    filters.from,
+    filters.to,
+  ]);
 
   const filteredAnalyses = analyses.filter((analysis) => {
     const matchesClient = !filters.client || analysis.client === filters.client;
@@ -79,16 +177,12 @@ export const DefectsModule = () => {
     const matchesDefect =
       !filters.defect ||
       analysis.defects.some((defect) => defect.name === filters.defect);
-    const matchesFrom = !filters.from || analysis.analysisDate >= filters.from;
-    const matchesTo = !filters.to || analysis.analysisDate <= filters.to;
-
     return (
       matchesClient &&
       matchesProduct &&
       matchesProcess &&
       matchesDefect &&
-      matchesFrom &&
-      matchesTo
+      matchesDateRange(analysis, filters.from, filters.to)
     );
   });
 

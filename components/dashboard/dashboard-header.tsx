@@ -49,10 +49,7 @@ const highlights: Array<{
   },
 ];
 
-export const DashboardHeader = ({
-  activeTab,
-  tabs,
-}: DashboardHeaderProps) => {
+export const DashboardHeader = ({ activeTab, tabs }: DashboardHeaderProps) => {
   const containerRef = useRef<HTMLElement>(null);
   const activeTabConfig = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
 
@@ -165,17 +162,17 @@ export const DashboardHeader = ({
             <span className="eyebrow">Lab Alta / tablero operativo</span>
             <span className="dashboard-hero__status">
               <span className="dashboard-hero__status-dot" />
-              interfaz unificada
+              ALTA S.A.
             </span>
           </div>
 
           <h1 className="dashboard-hero__title dashboard-hero__fade">
-            Calidad, recepcion y resguardo con una cabecera mas clara.
+            Dashboard interactivo para produccion, stock y resguardo de muestras
           </h1>
 
           <p className="dashboard-hero__description dashboard-hero__fade">
-            Una entrada mas limpia para alternar entre defectos, mercaderia al
-            natural y muestras almacenadas sin perder continuidad visual.
+            Registro Integral de defectos, mercaderia al natural y muestras
+            almacenadas.
           </p>
 
           <div className="dashboard-hero__metrics">

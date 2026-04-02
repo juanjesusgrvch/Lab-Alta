@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   Bar,
   BarChart,
@@ -32,6 +32,12 @@ import {
 } from "@/lib/format";
 import { initialNaturalEntries } from "@/lib/mock-data";
 import { exportElementToPdf } from "@/lib/pdf";
+import {
+  areStringFiltersEqual,
+  clearInvalidRelationalSelections,
+  getRelationalOptions,
+  type RelationalFieldConfig,
+} from "@/lib/relational-filters";
 import type { NaturalEntry } from "@/types/domain";
 
 const chartColors = ["#355c4b", "#c2703d", "#8f9b62", "#d7b377"];
@@ -54,6 +60,30 @@ const createEmptyForm = (): Omit<NaturalEntry, "id" | "netKg"> => ({
   },
 });
 
+type NaturalRelationalFilters = {
+  client: string;
+  product: string;
+  processCode: string;
+};
+
+const naturalFilterConfig: Record<
+  keyof NaturalRelationalFilters,
+  RelationalFieldConfig<NaturalEntry>
+> = {
+  client: {
+    getValues: (entry) => [entry.client],
+    matches: (entry, value) => entry.client === value,
+  },
+  product: {
+    getValues: (entry) => [entry.product],
+    matches: (entry, value) => entry.product === value,
+  },
+  processCode: {
+    getValues: (entry) => [entry.processCode],
+    matches: (entry, value) => entry.processCode === value,
+  },
+};
+
 export const NaturalModule = () => {
   const [entries, setEntries] = useState(initialNaturalEntries);
   const [filters, setFilters] = useState({
@@ -69,31 +99,98 @@ export const NaturalModule = () => {
   const [isPending, startTransition] = useTransition();
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const clientOptions = Array.from(new Set(entries.map((entry) => entry.client))).sort();
-  const productOptions = Array.from(new Set(entries.map((entry) => entry.product))).sort();
-  const processOptions = Array.from(
-    new Set(entries.map((entry) => entry.processCode)),
-  ).sort();
+  const relationalFilters: NaturalRelationalFilters = {
+    client: filters.client,
+    product: filters.product,
+    processCode: filters.processCode,
+  };
+
+  const matchesSupportFilters = (
+    entry: NaturalEntry,
+    analysis: string,
+    from: string,
+    to: string,
+  ) => {
+    const matchesAnalysis =
+      analysis === "all" ||
+      (analysis === "with" && entry.withAnalysis) ||
+      (analysis === "without" && !entry.withAnalysis);
+    const matchesFrom = !from || entry.entryDate >= from;
+    const matchesTo = !to || entry.entryDate <= to;
+
+    return matchesAnalysis && matchesFrom && matchesTo;
+  };
+
+  const clientOptions = getRelationalOptions(
+    entries,
+    relationalFilters,
+    "client",
+    naturalFilterConfig,
+    (entry) =>
+      matchesSupportFilters(entry, filters.analysis, filters.from, filters.to),
+  );
+  const productOptions = getRelationalOptions(
+    entries,
+    relationalFilters,
+    "product",
+    naturalFilterConfig,
+    (entry) =>
+      matchesSupportFilters(entry, filters.analysis, filters.from, filters.to),
+  );
+  const processOptions = getRelationalOptions(
+    entries,
+    relationalFilters,
+    "processCode",
+    naturalFilterConfig,
+    (entry) =>
+      matchesSupportFilters(entry, filters.analysis, filters.from, filters.to),
+  );
+
+  useEffect(() => {
+    setFilters((current) => {
+      const currentRelational: NaturalRelationalFilters = {
+        client: current.client,
+        product: current.product,
+        processCode: current.processCode,
+      };
+      const sanitizedRelational = clearInvalidRelationalSelections(
+        entries,
+        currentRelational,
+        naturalFilterConfig,
+        (entry) =>
+          matchesSupportFilters(entry, current.analysis, current.from, current.to),
+      );
+
+      if (areStringFiltersEqual(currentRelational, sanitizedRelational)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        ...sanitizedRelational,
+      };
+    });
+  }, [
+    entries,
+    filters.client,
+    filters.product,
+    filters.processCode,
+    filters.analysis,
+    filters.from,
+    filters.to,
+  ]);
 
   const filteredEntries = entries.filter((entry) => {
     const matchesClient = !filters.client || entry.client === filters.client;
     const matchesProduct = !filters.product || entry.product === filters.product;
     const matchesProcess =
       !filters.processCode || entry.processCode === filters.processCode;
-    const matchesAnalysis =
-      filters.analysis === "all" ||
-      (filters.analysis === "with" && entry.withAnalysis) ||
-      (filters.analysis === "without" && !entry.withAnalysis);
-    const matchesFrom = !filters.from || entry.entryDate >= filters.from;
-    const matchesTo = !filters.to || entry.entryDate <= filters.to;
 
     return (
       matchesClient &&
       matchesProduct &&
       matchesProcess &&
-      matchesAnalysis &&
-      matchesFrom &&
-      matchesTo
+      matchesSupportFilters(entry, filters.analysis, filters.from, filters.to)
     );
   });
 
