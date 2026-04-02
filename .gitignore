@@ -1,0 +1,21 @@
+# dependencies
+/node_modules
+
+# next
+/.next
+/out
+
+# production
+/build
+/.firebase
+
+# env
+.env*
+!.env.local.example
+
+# misc
+.DS_Store
+*.log
+npm-debug.log*
+/.agents
+/.config
