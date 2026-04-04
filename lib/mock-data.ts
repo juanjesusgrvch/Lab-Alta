@@ -78,6 +78,8 @@ export const initialNaturalEntries: NaturalEntry[] = [
     tareKg: 9800,
     netKg: 20700,
     withAnalysis: true,
+    analysisCode: "ANA-1002",
+    observations: "Ingreso dentro de especificacion.",
     analysisSummary: {
       humidityPct: 11.8,
       brokenPct: 1.6,
@@ -97,6 +99,8 @@ export const initialNaturalEntries: NaturalEntry[] = [
     tareKg: 9950,
     netKg: 21850,
     withAnalysis: false,
+    analysisCode: "",
+    observations: "Descarga directa a playa sin analisis asociado.",
   },
   {
     id: "ING-5003",
@@ -110,6 +114,8 @@ export const initialNaturalEntries: NaturalEntry[] = [
     tareKg: 9600,
     netKg: 20520,
     withAnalysis: true,
+    analysisCode: "ANA-1004",
+    observations: "Lote con seguimiento especial previo a almacenamiento.",
     analysisSummary: {
       humidityPct: 12.4,
       brokenPct: 2.1,
@@ -129,6 +135,8 @@ export const initialNaturalEntries: NaturalEntry[] = [
     tareKg: 9450,
     netKg: 19500,
     withAnalysis: true,
+    analysisCode: "ANA-1003",
+    observations: "Recepcion estable y descarga sin desvio operativo.",
     analysisSummary: {
       humidityPct: 11.3,
       brokenPct: 1.2,

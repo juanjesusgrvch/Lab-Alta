@@ -45,7 +45,13 @@ import {
 } from "@/lib/relational-filters";
 import type { StoredSample } from "@/types/domain";
 
-const chartColors = ["#355c4b", "#c2703d", "#8f9b62"];
+const chartColors = [
+  "var(--chart-accent-1)",
+  "var(--chart-accent-2)",
+  "var(--chart-accent-3)",
+];
+const chartGridColor = "var(--chart-grid)";
+const chartAxisColor = "var(--chart-axis)";
 const PAGE_SIZE = 10;
 
 const addDaysToDateString = (value: string, days: number) => {
@@ -592,7 +598,7 @@ export const SamplesModule = () => {
                       />
                     </div>
                     <p>
-                      {sample.client} · {sample.product} · {sample.processCode}
+                      {sample.client} / {sample.product} / {sample.processCode}
                     </p>
                   </div>
 
@@ -678,9 +684,9 @@ export const SamplesModule = () => {
           <div className="chart-shell">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={productData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#d8d0c2" />
-                <XAxis dataKey="name" stroke="#50614d" />
-                <YAxis allowDecimals={false} stroke="#50614d" />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                <XAxis dataKey="name" stroke={chartAxisColor} />
+                <YAxis allowDecimals={false} stroke={chartAxisColor} />
                 <Tooltip
                   formatter={(value: number) => [
                     `${formatInteger(value)} muestras`,

@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, Source_Sans_3 } from "next/font/google";
+import { Inter, Manrope } from "next/font/google";
 
 import "./globals.css";
 
-const headingFont = Space_Grotesk({
+const headingFont = Manrope({
   subsets: ["latin"],
   variable: "--font-heading",
 });
 
-const bodyFont = Source_Sans_3({
+const bodyFont = Inter({
   subsets: ["latin"],
   variable: "--font-body",
 });

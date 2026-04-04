@@ -33,7 +33,15 @@ import {
 } from "@/lib/relational-filters";
 import type { DefectAnalysis, DefectItem } from "@/types/domain";
 
-const chartColors = ["#355c4b", "#c2703d", "#8f9b62", "#d7b377", "#63784e"];
+const chartColors = [
+  "var(--chart-accent-1)",
+  "var(--chart-accent-2)",
+  "var(--chart-accent-3)",
+  "var(--chart-accent-4)",
+  "var(--chart-accent-5)",
+];
+const chartGridColor = "var(--chart-grid)";
+const chartAxisColor = "var(--chart-axis)";
 
 const createEmptyForm = (): Omit<DefectAnalysis, "id"> => ({
   analysisDate: getTodayInBuenosAires(),
@@ -626,9 +634,9 @@ export const DefectsModule = () => {
           <div className="chart-shell">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={defectChartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#d8d0c2" />
-                <XAxis dataKey="name" stroke="#50614d" />
-                <YAxis stroke="#50614d" />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                <XAxis dataKey="name" stroke={chartAxisColor} />
+                <YAxis stroke={chartAxisColor} />
                 <Tooltip />
                 <Bar dataKey="count" radius={[8, 8, 0, 0]}>
                   {defectChartData.map((entry, index) => (

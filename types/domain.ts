@@ -38,6 +38,8 @@ export interface NaturalEntry {
   tareKg: number;
   netKg: number;
   withAnalysis: boolean;
+  analysisCode?: string;
+  observations: string;
   analysisSummary?: NaturalAnalysisSummary;
 }
 

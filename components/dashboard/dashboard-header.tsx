@@ -4,8 +4,7 @@ import { useRef } from "react";
 
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { Activity, ArrowUpRight, Boxes, ShieldCheck } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { Moon, SunMedium } from "lucide-react";
 
 import { classNames } from "@/lib/format";
 import type { DashboardTab } from "@/types/domain";
@@ -21,37 +20,27 @@ export interface DashboardHeaderTab {
 interface DashboardHeaderProps {
   activeTab: DashboardTab;
   tabs: DashboardHeaderTab[];
+  onTabChange: (tab: DashboardTab) => void;
+  isSwitching: boolean;
+  themeMode: "dark" | "light";
+  onToggleTheme: () => void;
 }
 
-const highlights: Array<{
-  label: string;
-  value: string;
-  detail: string;
-  icon: LucideIcon;
-}> = [
-  {
-    label: "Cobertura",
-    value: "3 modulos",
-    detail: "defectos, recepcion y muestras dentro del mismo flujo",
-    icon: Boxes,
-  },
-  {
-    label: "Ritmo",
-    value: "Cambio inmediato",
-    detail: "el contexto visual cambia sin romper la lectura operativa",
-    icon: Activity,
-  },
-  {
-    label: "Lectura",
-    value: "Mas limpia",
-    detail: "una cabecera compacta para orientar rapido cada sesion",
-    icon: ShieldCheck,
-  },
-];
-
-export const DashboardHeader = ({ activeTab, tabs }: DashboardHeaderProps) => {
+export const DashboardHeader = ({
+  activeTab,
+  tabs,
+  onTabChange,
+  isSwitching,
+  themeMode,
+  onToggleTheme,
+}: DashboardHeaderProps) => {
   const containerRef = useRef<HTMLElement>(null);
   const activeTabConfig = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
+  const activeTabIndex = Math.max(
+    tabs.findIndex((tab) => tab.id === activeTab),
+    0,
+  );
+  const ThemeIcon = themeMode === "dark" ? SunMedium : Moon;
 
   useGSAP(
     () => {
@@ -60,58 +49,30 @@ export const DashboardHeader = ({ activeTab, tabs }: DashboardHeaderProps) => {
       media.add("(prefers-reduced-motion: no-preference)", () => {
         const introTimeline = gsap.timeline({
           defaults: {
-            duration: 0.78,
+            duration: 0.72,
             ease: "power3.out",
           },
         });
 
         introTimeline
-          .from(".dashboard-hero__fade", {
-            y: 28,
+          .from(".dashboard-console__fade", {
+            y: 18,
             autoAlpha: 0,
-            stagger: 0.08,
+            stagger: 0.06,
             clearProps: "all",
           })
           .from(
-            ".dashboard-hero__metric",
+            ".dashboard-console__tab",
             {
-              y: 18,
-              autoAlpha: 0,
-              stagger: 0.07,
-              clearProps: "all",
-            },
-            "<0.14",
-          )
-          .from(
-            ".dashboard-hero__module",
-            {
-              x: 20,
+              y: 14,
               autoAlpha: 0,
               stagger: 0.06,
               clearProps: "all",
             },
-            "<0.1",
+            "<0.08",
           );
 
-        gsap.to(".dashboard-hero__halo--primary", {
-          xPercent: 10,
-          yPercent: -8,
-          duration: 10,
-          repeat: -1,
-          yoyo: true,
-          ease: "sine.inOut",
-        });
-
-        gsap.to(".dashboard-hero__halo--secondary", {
-          xPercent: -8,
-          yPercent: 10,
-          duration: 12,
-          repeat: -1,
-          yoyo: true,
-          ease: "sine.inOut",
-        });
-
-        gsap.to(".dashboard-hero__status-dot", {
+        gsap.to(".dashboard-console__status-dot", {
           scale: 1.08,
           opacity: 0.62,
           duration: 1.8,
@@ -131,10 +92,10 @@ export const DashboardHeader = ({ activeTab, tabs }: DashboardHeaderProps) => {
       const media = gsap.matchMedia();
 
       media.add("(prefers-reduced-motion: no-preference)", () => {
-        gsap.from(".dashboard-hero__active-content", {
-          y: 14,
+        gsap.from(".dashboard-console__active", {
+          y: 12,
           autoAlpha: 0,
-          duration: 0.42,
+          duration: 0.36,
           ease: "power2.out",
           clearProps: "all",
         });
@@ -150,77 +111,74 @@ export const DashboardHeader = ({ activeTab, tabs }: DashboardHeaderProps) => {
   );
 
   return (
-    <header ref={containerRef} className="dashboard-hero card">
-      <div className="dashboard-hero__backdrop" aria-hidden="true">
-        <span className="dashboard-hero__halo dashboard-hero__halo--primary" />
-        <span className="dashboard-hero__halo dashboard-hero__halo--secondary" />
-      </div>
-
-      <div className="dashboard-hero__layout">
-        <div className="dashboard-hero__copy">
-          <div className="dashboard-hero__topline dashboard-hero__fade">
-            <span className="eyebrow">Lab Alta / tablero operativo</span>
-            <span className="dashboard-hero__status">
-              <span className="dashboard-hero__status-dot" />
-              ALTA S.A.
-            </span>
-          </div>
-
-          <h1 className="dashboard-hero__title dashboard-hero__fade">
-            Dashboard interactivo para produccion, stock y resguardo de muestras
-          </h1>
-
-          <p className="dashboard-hero__description dashboard-hero__fade">
-            Registro Integral de defectos, mercaderia al natural y muestras
-            almacenadas.
-          </p>
-
-          <div className="dashboard-hero__metrics">
-            {highlights.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <article key={item.label} className="dashboard-hero__metric">
-                  <div className="dashboard-hero__metric-icon">
-                    <Icon size={18} strokeWidth={1.8} />
-                  </div>
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                  <p>{item.detail}</p>
-                </article>
-              );
-            })}
-          </div>
+    <header ref={containerRef} className="dashboard-console">
+      <div className="dashboard-console__topbar dashboard-console__fade">
+        <div className="dashboard-console__identity">
+          <strong>ALTA S.A.</strong>
+          <span className="dashboard-console__status">
+            <span className="dashboard-console__status-dot" />
+            Live
+          </span>
         </div>
 
-        <aside className="dashboard-hero__panel dashboard-hero__fade">
-          <div key={activeTab} className="dashboard-hero__active-content">
-            <span className="dashboard-hero__panel-label">Ahora en foco</span>
-            <div className="dashboard-hero__panel-title">
-              <strong>{activeTabConfig.label}</strong>
-              <ArrowUpRight size={18} strokeWidth={1.8} />
-            </div>
-            <p>{activeTabConfig.description}</p>
-          </div>
+        <div className="dashboard-console__actions">
+          <button
+            type="button"
+            className="dashboard-console__theme-toggle"
+            onClick={onToggleTheme}
+            aria-pressed={themeMode === "light"}
+            aria-label={
+              themeMode === "dark"
+                ? "Cambiar a tema claro"
+                : "Cambiar a tema oscuro"
+            }
+          >
+            <ThemeIcon size={15} strokeWidth={1.9} />
+            <span>{themeMode === "dark" ? "Claro" : "Oscuro"}</span>
+          </button>
 
-          <div className="dashboard-hero__module-list">
-            {tabs.map((tab, index) => (
-              <div
-                key={tab.id}
-                className={classNames(
-                  "dashboard-hero__module",
-                  activeTab === tab.id && "is-active",
-                )}
-              >
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <div>
-                  <strong>{tab.label}</strong>
-                  <p>{tab.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </aside>
+          <button
+            type="button"
+            className="dashboard-console__avatar"
+            aria-label="Perfil de Alta"
+          >
+            AL
+          </button>
+        </div>
+      </div>
+
+      <div className="dashboard-console__deck">
+        <div key={activeTab} className="dashboard-console__active dashboard-console__fade">
+          <span className="eyebrow">
+            Modulo {String(activeTabIndex + 1).padStart(2, "0")}
+          </span>
+          <h1>{activeTabConfig.label}</h1>
+          <p>{activeTabConfig.description}</p>
+        </div>
+
+        <div
+          className="dashboard-console__switcher dashboard-console__fade"
+          role="tablist"
+          aria-label="Modulos del dashboard"
+        >
+          {tabs.map((tab, index) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={classNames(
+                "dashboard-console__tab",
+                activeTab === tab.id && "is-active",
+              )}
+              onClick={() => onTabChange(tab.id)}
+              disabled={isSwitching}
+            >
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <strong>{tab.label}</strong>
+            </button>
+          ))}
+        </div>
       </div>
     </header>
   );

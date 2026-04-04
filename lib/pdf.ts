@@ -7,9 +7,13 @@ export const exportElementToPdf = async (
   element: HTMLElement,
   fileName: string,
 ) => {
+  const backgroundColor =
+    getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() ||
+    "#07111f";
+
   const canvas = await html2canvas(element, {
     scale: 2,
-    backgroundColor: "#f5efe2",
+    backgroundColor,
     useCORS: true,
   });
 

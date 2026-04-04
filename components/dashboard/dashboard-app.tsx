@@ -18,29 +18,27 @@ import type { DashboardTab } from "@/types/domain";
 
 gsap.registerPlugin(useGSAP);
 
-const tabs: Array<DashboardHeaderTab & { toneClass: string }> = [
+const tabs: DashboardHeaderTab[] = [
   {
     id: "defects",
     label: "Defectos",
-    description: "Analisis detallado por cliente, producto, defecto y proceso.",
-    toneClass: "tab-defects",
+    description: "Lectura por cliente, producto, defecto y proceso.",
   },
   {
     id: "natural",
     label: "Mercaderia al natural",
-    description: "Recepcion por camion, stock entrante y analisis opcional.",
-    toneClass: "tab-natural",
+    description: "Recepcion, stock entrante y control analitico.",
   },
   {
     id: "samples",
     label: "Muestras almacenadas",
-    description: "Trazabilidad del deposito y vencimientos de retencion.",
-    toneClass: "tab-samples",
+    description: "Resguardo, vencimientos y trazabilidad de deposito.",
   },
 ];
 
 export const DashboardApp = () => {
   const [activeTab, setActiveTab] = useState<DashboardTab>("defects");
+  const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
   const [previousTab, setPreviousTab] = useState<DashboardTab | null>(null);
   const [isSwitching, setIsSwitching] = useState(false);
   const panelsStageRef = useRef<HTMLDivElement>(null);
@@ -54,6 +52,27 @@ export const DashboardApp = () => {
   useEffect(() => {
     void getFirebaseAnalytics();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const savedTheme = window.localStorage.getItem("lab-alta-ui-theme");
+    const nextTheme =
+      savedTheme === "light" || savedTheme === "dark"
+        ? savedTheme
+        : window.matchMedia("(prefers-color-scheme: light)").matches
+          ? "light"
+          : "dark";
+
+    setThemeMode(nextTheme);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.uiTheme = themeMode;
+    window.localStorage.setItem("lab-alta-ui-theme", themeMode);
+  }, [themeMode]);
 
   useGSAP(
     () => {
@@ -174,33 +193,31 @@ export const DashboardApp = () => {
     panelsRef.current[tabId] = node;
   };
 
+  const handleThemeToggle = () => {
+    setThemeMode((current) => (current === "dark" ? "light" : "dark"));
+  };
+
   return (
-    <main className={classNames("app-shell", `theme-${activeTab}`)}>
+    <main
+      className={classNames(
+        "app-shell",
+        `theme-${activeTab}`,
+        `mode-${themeMode}`,
+      )}
+    >
       <div className="ambient ambient-left" />
       <div className="ambient ambient-right" />
 
-      <DashboardHeader activeTab={activeTab} tabs={tabs} />
+      <DashboardHeader
+        activeTab={activeTab}
+        tabs={tabs}
+        onTabChange={handleTabChange}
+        isSwitching={isSwitching}
+        themeMode={themeMode}
+        onToggleTheme={handleThemeToggle}
+      />
 
       <section className="workspace">
-        <div className="tabs-row">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              className={classNames(
-                "tab-button",
-                tab.toneClass,
-                activeTab === tab.id && "is-active",
-              )}
-              onClick={() => handleTabChange(tab.id)}
-              disabled={isSwitching}
-            >
-              <strong>{tab.label}</strong>
-              <span>{tab.description}</span>
-            </button>
-          ))}
-        </div>
-
         <div
           ref={panelsStageRef}
           className="tab-panels-stage"
