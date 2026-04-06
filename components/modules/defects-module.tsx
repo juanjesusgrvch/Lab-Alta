@@ -238,7 +238,16 @@ export const DefectsModule = () => {
     field: keyof Omit<DefectAnalysis, "id" | "defects">,
     value: string | number,
   ) => {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm((current) => {
+      const nextForm = {
+        ...current,
+      };
+      const mutableForm = nextForm as Record<string, any>;
+
+      mutableForm[field as string] = value as any;
+
+      return nextForm as Omit<DefectAnalysis, "id">;
+    });
   };
 
   const handleDefectChange = (
@@ -249,7 +258,18 @@ export const DefectsModule = () => {
     setForm((current) => ({
       ...current,
       defects: current.defects.map((defect) =>
-        defect.id === defectId ? { ...defect, [field]: value } : defect,
+        defect.id === defectId
+          ? (() => {
+              const nextDefect = {
+                ...defect,
+              };
+              const mutableDefect = nextDefect as Record<string, any>;
+
+              mutableDefect[field as string] = value as any;
+
+              return nextDefect as DefectItem;
+            })()
+          : defect,
       ),
     }));
   };

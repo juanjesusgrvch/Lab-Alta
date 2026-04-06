@@ -342,14 +342,16 @@ export const SamplesModule = () => {
 
       const nextForm = {
         ...current,
-        [field]: nextValue,
       };
+      const mutableForm = nextForm as Record<string, any>;
+
+      mutableForm[field as string] = nextValue as any;
 
       if (field === "storedAt" && isRetentionPreset && typeof nextValue === "string") {
         nextForm.retentionUntil = addDaysToDateString(nextValue, 90);
       }
 
-      return nextForm;
+      return nextForm as Omit<StoredSample, "id">;
     });
   };
 

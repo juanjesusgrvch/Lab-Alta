@@ -470,10 +470,14 @@ export const NaturalModule = () => {
       const normalizedValue =
         typeof value === "string" ? normalizeUppercaseValue(value) : value;
 
-      return {
+      const nextForm = {
         ...current,
-        [field]: normalizedValue,
       };
+      const mutableForm = nextForm as Record<string, any>;
+
+      mutableForm[field as string] = normalizedValue as any;
+
+      return nextForm as NaturalFormState;
     });
   };
 
