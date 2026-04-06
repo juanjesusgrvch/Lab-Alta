@@ -1,4 +1,10 @@
-import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
+import {
+  getApp,
+  getApps,
+  initializeApp,
+  type FirebaseApp,
+  type FirebaseOptions,
+} from "firebase/app";
 import {
   getAnalytics,
   isSupported,
@@ -6,7 +12,7 @@ import {
 } from "firebase/analytics";
 import { getFirestore } from "firebase/firestore";
 
-const firebaseConfig = {
+const firebaseConfig: FirebaseOptions = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
@@ -22,16 +28,29 @@ export const firestoreCollections = {
   storedSamples: "storedSamples",
 } as const;
 
-export const hasFirebaseConfig = Object.values(firebaseConfig).every(Boolean);
+const hasExplicitFirebaseConfig = Boolean(
+  firebaseConfig.apiKey &&
+    firebaseConfig.authDomain &&
+    firebaseConfig.projectId &&
+    firebaseConfig.storageBucket &&
+    firebaseConfig.messagingSenderId &&
+    firebaseConfig.appId,
+);
+
+export const hasFirebaseConfig = hasExplicitFirebaseConfig;
 
 export const getFirebaseApp = (): FirebaseApp => {
-  if (!hasFirebaseConfig) {
-    throw new Error(
-      "Faltan variables NEXT_PUBLIC_FIREBASE_* en .env.local para inicializar Firebase.",
-    );
+  if (getApps().length) {
+    return getApp();
   }
 
-  return getApps().length ? getApp() : initializeApp(firebaseConfig);
+  try {
+    return hasExplicitFirebaseConfig ? initializeApp(firebaseConfig) : initializeApp();
+  } catch {
+    throw new Error(
+      "No se pudo inicializar Firebase. En desarrollo, completa NEXT_PUBLIC_FIREBASE_* en .env.local. En Firebase App Hosting, usa la configuracion automatica del entorno o variables definidas en la consola.",
+    );
+  }
 };
 
 export const getFirebaseDb = () => getFirestore(getFirebaseApp());
@@ -39,14 +58,14 @@ export const getFirebaseDb = () => getFirestore(getFirebaseApp());
 let analyticsPromise: Promise<Analytics | null> | null = null;
 
 export const getFirebaseAnalytics = async () => {
-  if (typeof window === "undefined" || !hasFirebaseConfig) {
+  if (typeof window === "undefined") {
     return null;
   }
 
   if (!analyticsPromise) {
-    analyticsPromise = isSupported().then((supported) =>
-      supported ? getAnalytics(getFirebaseApp()) : null,
-    );
+    analyticsPromise = isSupported()
+      .then((supported) => (supported ? getAnalytics(getFirebaseApp()) : null))
+      .catch(() => null);
   }
 
   return analyticsPromise;

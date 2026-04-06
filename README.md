@@ -37,6 +37,12 @@ Copiar `.env.local.example` a `.env.local` y completar:
 
 La inicializacion esta centralizada en `lib/firebase.ts`.
 
+En desarrollo local, la app usa `.env.local`.
+
+En Firebase App Hosting, la app puede usar la configuracion web inyectada automaticamente por el entorno, por lo que no hace falta versionar las variables `NEXT_PUBLIC_FIREBASE_*` dentro de `apphosting.yaml`.
+
+Importante: la `apiKey` de Firebase Web no funciona como un secreto de servidor. Segun la documentacion oficial de Firebase, identifica el proyecto pero no autoriza acceso a Firestore o Storage por si sola. La proteccion real depende de Firebase Security Rules y, si corresponde, App Check.
+
 ## Colecciones sugeridas en Firestore
 
 - `defectAnalyses`
