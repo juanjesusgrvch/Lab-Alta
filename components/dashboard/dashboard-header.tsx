@@ -4,7 +4,7 @@ import { useRef } from "react";
 
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { Moon, SunMedium } from "lucide-react";
+import { LogOut, Moon, SunMedium } from "lucide-react";
 
 import { classNames } from "@/lib/format";
 import type { DashboardTab } from "@/types/domain";
@@ -24,7 +24,20 @@ interface DashboardHeaderProps {
   isSwitching: boolean;
   themeMode: "dark" | "light";
   onToggleTheme: () => void;
+  sessionLabel: string;
+  onSignOut: () => void;
 }
+
+const getSessionInitials = (value: string) => {
+  const initials = value
+    .split(/[\s@._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+
+  return initials || "AL";
+};
 
 export const DashboardHeader = ({
   activeTab,
@@ -33,6 +46,8 @@ export const DashboardHeader = ({
   isSwitching,
   themeMode,
   onToggleTheme,
+  sessionLabel,
+  onSignOut,
 }: DashboardHeaderProps) => {
   const containerRef = useRef<HTMLElement>(null);
   const activeTabConfig = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
@@ -41,6 +56,7 @@ export const DashboardHeader = ({
     0,
   );
   const ThemeIcon = themeMode === "dark" ? SunMedium : Moon;
+  const sessionInitials = getSessionInitials(sessionLabel);
 
   useGSAP(
     () => {
@@ -117,11 +133,18 @@ export const DashboardHeader = ({
           <strong>ALTA S.A.</strong>
           <span className="dashboard-console__status">
             <span className="dashboard-console__status-dot" />
-            Live
+            conectado
           </span>
         </div>
 
         <div className="dashboard-console__actions">
+          <span
+            className="dashboard-console__session-label"
+            title={sessionLabel}
+          >
+            {sessionLabel}
+          </span>
+
           <button
             type="button"
             className="dashboard-console__theme-toggle"
@@ -134,21 +157,34 @@ export const DashboardHeader = ({
             }
           >
             <ThemeIcon size={15} strokeWidth={1.9} />
-            <span>{themeMode === "dark" ? "Claro" : "Oscuro"}</span>
+            <span>{themeMode === "dark" ? "Tema" : "Tema"}</span>
           </button>
 
           <button
             type="button"
             className="dashboard-console__avatar"
-            aria-label="Perfil de Alta"
+            aria-label={`Sesion activa de ${sessionLabel}`}
           >
-            AL
+            {sessionInitials}
+          </button>
+
+          <button
+            type="button"
+            className="dashboard-console__logout"
+            onClick={onSignOut}
+            aria-label="Cerrar sesion"
+          >
+            <LogOut size={15} strokeWidth={1.9} />
+            <span>Salir</span>
           </button>
         </div>
       </div>
 
       <div className="dashboard-console__deck">
-        <div key={activeTab} className="dashboard-console__active dashboard-console__fade">
+        <div
+          key={activeTab}
+          className="dashboard-console__active dashboard-console__fade"
+        >
           <span className="eyebrow">
             Modulo {String(activeTabIndex + 1).padStart(2, "0")}
           </span>

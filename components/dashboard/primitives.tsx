@@ -32,7 +32,7 @@ export const SectionCard = ({
 interface MetricCardProps {
   label: string;
   value: string;
-  caption: string;
+  caption?: string;
   tone?: "olive" | "rust" | "sand" | "forest";
 }
 
@@ -45,7 +45,7 @@ export const MetricCard = ({
   <article className={classNames("metric-card", `tone-${tone}`)}>
     <span>{label}</span>
     <strong>{value}</strong>
-    <p>{caption}</p>
+    {caption ? <p>{caption}</p> : null}
   </article>
 );
 

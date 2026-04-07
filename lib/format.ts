@@ -16,7 +16,19 @@ export const formatDecimal = (value: number) =>
     maximumFractionDigits: 1,
   }).format(value);
 
+export const formatCompactDecimal = (value: number, maximumFractionDigits = 2) =>
+  new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  }).format(value);
+
 export const formatKg = (value: number) => `${formatInteger(value)} kg`;
+
+export const formatGrams = (value: number) =>
+  `${formatCompactDecimal(Number.isFinite(value) ? value : 0, 2)} gr`;
+
+export const formatHundredths = (value: number) =>
+  `${formatInteger(Math.round(Number.isFinite(value) ? value : 0))}/100g`;
 
 export const formatPercent = (value: number) => `${formatDecimal(value)} %`;
 

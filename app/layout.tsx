@@ -14,9 +14,9 @@ const bodyFont = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Lab Alta Dashboard",
+  title: "Lab Alta | Control Operativo",
   description:
-    "Dashboard operativo para defectos, mercaderia al natural y control de muestras con Next.js, TypeScript y Firebase.",
+    "Control operativo con login Firebase para defectos, descargas y muestras.",
 };
 
 export default function RootLayout({

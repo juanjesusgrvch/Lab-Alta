@@ -2,6 +2,38 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function authorizedOperator() {
+      return signedIn() && (
+        request.auth.uid == "YmFkf4hqIaQsBWm1waccoIdxB7K2" ||
+        request.auth.uid == "RTgzHx5HHiNYVlPxVGIxkXMYsK83"
+      );
+    }
+
+    function sameUser(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    match /usuarios/{userId} {
+      allow read, create, update: if authorizedOperator() && sameUser(userId);
+      allow delete: if false;
+    }
+
+    match /defectos/{documentId} {
+      allow read, write: if authorizedOperator();
+    }
+
+    match /descargas/{documentId} {
+      allow read, write: if authorizedOperator();
+    }
+
+    match /muestras/{documentId} {
+      allow read, write: if authorizedOperator();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

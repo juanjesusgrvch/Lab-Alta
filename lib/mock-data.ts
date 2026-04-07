@@ -1,69 +1,4 @@
-import type { DefectAnalysis, NaturalEntry, StoredSample } from "@/types/domain";
-
-export const initialDefectAnalyses: DefectAnalysis[] = [
-  {
-    id: "ANA-1001",
-    analysisDate: "2026-03-28",
-    client: "Exportadora Sur",
-    product: "Poroto negro",
-    processCode: "PROC-L1",
-    lotCode: "L-2238",
-    operator: "Paula Gimenez",
-    totalUnitsInspected: 480,
-    defects: [
-      { id: "d1", name: "Partido", count: 16 },
-      { id: "d2", name: "Materia extraña", count: 5 },
-      { id: "d3", name: "Manchado", count: 9 },
-    ],
-    observations: "Lote estable, con desvío leve en clasificación final.",
-  },
-  {
-    id: "ANA-1002",
-    analysisDate: "2026-03-29",
-    client: "Molino Andino",
-    product: "Poroto alubia",
-    processCode: "PROC-A3",
-    lotCode: "L-2241",
-    operator: "Leonardo Sosa",
-    totalUnitsInspected: 520,
-    defects: [
-      { id: "d4", name: "Picado", count: 11 },
-      { id: "d5", name: "Partido", count: 7 },
-    ],
-    observations: "Necesita revisar zaranda de ingreso por presencia de picado.",
-  },
-  {
-    id: "ANA-1003",
-    analysisDate: "2026-03-30",
-    client: "Agro Pacífico",
-    product: "Poroto colorado",
-    processCode: "PROC-C2",
-    lotCode: "L-2249",
-    operator: "Micaela Vera",
-    totalUnitsInspected: 410,
-    defects: [
-      { id: "d6", name: "Partido", count: 13 },
-      { id: "d7", name: "Descolorido", count: 6 },
-      { id: "d8", name: "Materia extraña", count: 4 },
-    ],
-    observations: "Desvío asociado a mezcla de calibres en pre-limpieza.",
-  },
-  {
-    id: "ANA-1004",
-    analysisDate: "2026-04-01",
-    client: "Exportadora Sur",
-    product: "Poroto cranberry",
-    processCode: "PROC-CR1",
-    lotCode: "L-2254",
-    operator: "Paula Gimenez",
-    totalUnitsInspected: 450,
-    defects: [
-      { id: "d9", name: "Manchado", count: 14 },
-      { id: "d10", name: "Partido", count: 8 },
-    ],
-    observations: "Recomendado ajustar humedad antes de embolsado.",
-  },
-];
+import type { NaturalEntry, StoredSample } from "@/types/domain";
 
 export const initialNaturalEntries: NaturalEntry[] = [
   {
@@ -80,18 +15,27 @@ export const initialNaturalEntries: NaturalEntry[] = [
     withAnalysis: true,
     analysisCode: "ANA-1002",
     observations: "Ingreso dentro de especificacion.",
+    packagingMovements: [
+      {
+        id: "PKG-5001-1",
+        movementType: "alta",
+        packagingType: "BOLSON DE 1000 KG",
+        packagingCondition: "USADO",
+        quantity: 20,
+      },
+    ],
     analysisSummary: {
       humidityPct: 11.8,
       brokenPct: 1.6,
       foreignMatterPct: 0.4,
-      notes: "Ingreso dentro de especificación.",
+      notes: "Ingreso dentro de especificacion.",
     },
   },
   {
     id: "ING-5002",
     entryDate: "2026-03-29",
     truckPlate: "AF552TY",
-    client: "Agro Pacífico",
+    client: "Agro Pacifico",
     supplier: "Campo Norte",
     product: "Poroto negro",
     processCode: "PROC-L1",
@@ -101,6 +45,15 @@ export const initialNaturalEntries: NaturalEntry[] = [
     withAnalysis: false,
     analysisCode: "",
     observations: "Descarga directa a playa sin analisis asociado.",
+    packagingMovements: [
+      {
+        id: "PKG-5002-1",
+        movementType: "alta",
+        packagingType: "BOLSA 50 KG",
+        packagingCondition: "NUEVO",
+        quantity: 110,
+      },
+    ],
   },
   {
     id: "ING-5003",
@@ -116,6 +69,22 @@ export const initialNaturalEntries: NaturalEntry[] = [
     withAnalysis: true,
     analysisCode: "ANA-1004",
     observations: "Lote con seguimiento especial previo a almacenamiento.",
+    packagingMovements: [
+      {
+        id: "PKG-5003-1",
+        movementType: "alta",
+        packagingType: "BOLSON DE 1000 KG",
+        packagingCondition: "USADO",
+        quantity: 18,
+      },
+      {
+        id: "PKG-5003-2",
+        movementType: "baja",
+        packagingType: "BOLSA 25 KG",
+        packagingCondition: "USADO",
+        quantity: 6,
+      },
+    ],
     analysisSummary: {
       humidityPct: 12.4,
       brokenPct: 2.1,
@@ -137,6 +106,15 @@ export const initialNaturalEntries: NaturalEntry[] = [
     withAnalysis: true,
     analysisCode: "ANA-1003",
     observations: "Recepcion estable y descarga sin desvio operativo.",
+    packagingMovements: [
+      {
+        id: "PKG-5004-1",
+        movementType: "alta",
+        packagingType: "BOLSON DE 1000 KG",
+        packagingCondition: "USADO",
+        quantity: 19,
+      },
+    ],
     analysisSummary: {
       humidityPct: 11.3,
       brokenPct: 1.2,
@@ -152,6 +130,7 @@ export const initialStoredSamples: StoredSample[] = [
     storedAt: "2026-03-20",
     sampleCode: "MS-24-001",
     client: "Exportadora Sur",
+    supplier: "FINCA SUR 1",
     product: "Poroto negro",
     processCode: "PROC-L1",
     relatedAnalysisId: "ANA-1001",
@@ -160,13 +139,14 @@ export const initialStoredSamples: StoredSample[] = [
     quantityKg: 12,
     retentionUntil: "2026-05-20",
     status: "Activa",
-    notes: "Muestra patrón de referencia comercial.",
+    notes: "Muestra patron de referencia comercial.",
   },
   {
     id: "SMP-9002",
     storedAt: "2026-03-25",
     sampleCode: "MS-24-014",
     client: "Molino Andino",
+    supplier: "CAMPO EL OASIS",
     product: "Poroto alubia",
     processCode: "PROC-A3",
     relatedAnalysisId: "ANA-1002",
@@ -181,7 +161,8 @@ export const initialStoredSamples: StoredSample[] = [
     id: "SMP-9003",
     storedAt: "2026-03-12",
     sampleCode: "MS-24-020",
-    client: "Agro Pacífico",
+    client: "Agro Pacifico",
+    supplier: "LOTE PACIFICO",
     product: "Poroto colorado",
     processCode: "PROC-C2",
     relatedAnalysisId: "ANA-1003",
@@ -197,6 +178,7 @@ export const initialStoredSamples: StoredSample[] = [
     storedAt: "2026-02-28",
     sampleCode: "MS-24-027",
     client: "Exportadora Sur",
+    supplier: "FINCA NORTE",
     product: "Poroto cranberry",
     processCode: "PROC-CR1",
     relatedAnalysisId: "ANA-1004",
@@ -205,6 +187,6 @@ export const initialStoredSamples: StoredSample[] = [
     quantityKg: 6,
     retentionUntil: "2026-03-28",
     status: "Vencida",
-    notes: "Pendiente de disposición final.",
+    notes: "Pendiente de disposicion final.",
   },
 ];

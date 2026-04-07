@@ -3,6 +3,11 @@
     "public": "out",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
   },
+  "auth": {
+    "providers": {
+      "emailPassword": true
+    }
+  },
   "firestore": {
     "database": "(default)",
     "location": "southamerica-east1",

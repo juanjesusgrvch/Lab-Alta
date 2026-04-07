@@ -3,20 +3,26 @@ export type DashboardTab = "defects" | "natural" | "samples";
 export interface DefectItem {
   id: string;
   name: string;
-  count: number;
+  detail?: string;
+  grams: number;
 }
 
 export interface DefectAnalysis {
   id: string;
   analysisDate: string;
   client: string;
+  supplier: string;
   product: string;
   processCode: string;
-  lotCode: string;
-  operator: string;
-  totalUnitsInspected: number;
+  sampleWeightGr: number;
+  relatedAnalysis: string;
+  outputStage: string;
+  gramajeHundredths: number;
+  humidity: number;
   defects: DefectItem[];
   observations: string;
+  createdAtMs?: number;
+  updatedAtMs?: number;
 }
 
 export interface NaturalAnalysisSummary {
@@ -24,6 +30,14 @@ export interface NaturalAnalysisSummary {
   brokenPct: number;
   foreignMatterPct: number;
   notes: string;
+}
+
+export interface PackagingMovement {
+  id: string;
+  movementType: "alta" | "baja";
+  packagingType: string;
+  packagingCondition: string;
+  quantity: number;
 }
 
 export interface NaturalEntry {
@@ -40,6 +54,7 @@ export interface NaturalEntry {
   withAnalysis: boolean;
   analysisCode?: string;
   observations: string;
+  packagingMovements?: PackagingMovement[];
   analysisSummary?: NaturalAnalysisSummary;
 }
 
@@ -48,6 +63,7 @@ export interface StoredSample {
   storedAt: string;
   sampleCode: string;
   client: string;
+  supplier: string;
   product: string;
   processCode: string;
   relatedAnalysisId: string;

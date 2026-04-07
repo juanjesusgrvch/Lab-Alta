@@ -1,20 +1,22 @@
-# Lab Alta Dashboard
+# Lab Alta
 
-Base inicial de una app web en `Next.js + TypeScript` para operar tres procesos:
+Base operativa en `Next.js + TypeScript` para trabajar con tres frentes:
 
-1. Base de defectos analizados en produccion.
-2. Base de mercaderia al natural para ingresos por camion.
-3. Control de muestras almacenadas en deposito.
+1. `defectos`
+2. `descargas`
+3. `muestras`
+
+El repositorio quedo preparado para arrancar limpio: sin caches, sin builds previos, sin logs de desarrollo y con una base de acceso por Firebase lista para extender.
 
 ## Stack
 
 - Next.js App Router
 - TypeScript
-- Firebase SDK preparada para Firestore
-- Recharts para graficos interactivos
+- Firebase Authentication + Firestore
+- Recharts para graficos
 - jsPDF + html2canvas para exportacion PDF
 
-## Puesta en marcha
+## Arranque
 
 ```bash
 npm install
@@ -23,7 +25,7 @@ npm run dev
 
 La app queda disponible en `http://localhost:3000`.
 
-## Variables de entorno
+## Firebase
 
 Copiar `.env.local.example` a `.env.local` y completar:
 
@@ -35,41 +37,53 @@ Copiar `.env.local.example` a `.env.local` y completar:
 - `NEXT_PUBLIC_FIREBASE_APP_ID`
 - `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID`
 
-La inicializacion esta centralizada en `lib/firebase.ts`.
+La inicializacion vive en `lib/firebase.ts`.
 
-En desarrollo local, la app usa `.env.local`.
+La capa de autenticacion vive en `lib/firebase-auth.ts`.
 
-En Firebase App Hosting, la app puede usar la configuracion web inyectada automaticamente por el entorno, por lo que no hace falta versionar las variables `NEXT_PUBLIC_FIREBASE_*` dentro de `apphosting.yaml`.
+La capa base de Firestore vive en `lib/firestore-records.ts`.
 
-Importante: la `apiKey` de Firebase Web no funciona como un secreto de servidor. Segun la documentacion oficial de Firebase, identifica el proyecto pero no autoriza acceso a Firestore o Storage por si sola. La proteccion real depende de Firebase Security Rules y, si corresponde, App Check.
+### Colecciones previstas
 
-## Colecciones sugeridas en Firestore
+- `usuarios`
+- `defectos`
+- `descargas`
+- `muestras`
 
-- `defectAnalyses`
-- `naturalInbound`
-- `storedSamples`
+### Reglas base
+
+- Solo el operador inicial autorizado puede leer y escribir en `defectos`, `descargas` y `muestras`.
+- Solo el operador autorizado puede crear o actualizar su propio documento en `usuarios/{uid}`.
+- Una cuenta autenticada pero fuera de la allowlist no entra al dashboard real y no toca Firestore.
+
+### Usuario inicial autorizado
+
+- UID habilitado: `YmFkf4hqIaQsBWm1waccoIdxB7K2`
+- La allowlist local vive en `lib/access-control.ts`.
+- La restriccion de reglas vive en `firestore.rules`.
+- Para sumar los otros dos accesos, agrega sus UIDs a `allowedOperatorAccounts`.
+
+## Carpetas operativas
+
+Se agrego una estructura local para entradas manuales o importaciones:
+
+- `registros/defectos`
+- `registros/descargas`
+- `registros/muestras`
 
 ## Estructura principal
 
-- `app/`: layout global, pagina principal y estilos.
-- `components/dashboard/`: shell del dashboard y primitivas visuales.
-- `components/modules/`: cada pestaña de negocio.
-- `lib/`: configuracion Firebase, mock data, utilidades de formato y exportacion PDF.
-- `types/`: modelos de dominio compartidos.
+- `app/`: entrada de la aplicacion y estilos globales.
+- `components/auth/`: puerta de login y acceso.
+- `components/dashboard/`: shell visual del tablero.
+- `components/modules/`: modulos funcionales actuales.
+- `lib/`: Firebase, acceso a datos y utilidades.
+- `registros/`: carpetas locales para carga operativa.
+- `types/`: modelos de dominio.
 
-## Proximos pasos recomendados
+## Siguiente paso natural
 
-1. Reemplazar los arrays mock por lectura/escritura en Firestore.
-2. Agregar autenticacion y roles por perfil.
-3. Persistir filtros y vistas frecuentes.
-4. Incorporar exportaciones PDF con branding y encabezados fijos.
-5. Definir estrategia de despliegue en Firebase Hosting.
-
-## Hosting en Firebase
-
-Para produccion tenes dos caminos viables:
-
-1. Firebase App Hosting si queres un flujo moderno compatible con frameworks.
-2. Firebase Hosting con integracion de frameworks para desplegar el build de Next.
-
-Antes de desplegar conviene definir el `projectId`, reglas de Firestore y politica de acceso por usuarios.
+1. Habilitar Email/Password en Firebase Authentication.
+2. Crear usuarios iniciales en Firebase Console.
+3. Reemplazar progresivamente los mocks por `createRecord`, `saveRecord` y `listLatestRecords`.
+4. Definir roles y permisos mas finos si el tablero va a tener distintos perfiles.

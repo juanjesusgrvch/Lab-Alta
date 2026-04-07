@@ -10,6 +10,7 @@ import {
   isSupported,
   type Analytics,
 } from "firebase/analytics";
+import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig: FirebaseOptions = {
@@ -23,10 +24,19 @@ const firebaseConfig: FirebaseOptions = {
 };
 
 export const firestoreCollections = {
-  defectAnalyses: "defectAnalyses",
-  naturalInbound: "naturalInbound",
-  storedSamples: "storedSamples",
+  defects: "defectos",
+  downloads: "descargas",
+  samples: "muestras",
+  users: "usuarios",
 } as const;
+
+export const recordsWorkspaceFolders = {
+  defects: "registros/defectos",
+  downloads: "registros/descargas",
+  samples: "registros/muestras",
+} as const;
+
+export type OperationalRecordKey = keyof typeof recordsWorkspaceFolders;
 
 const hasExplicitFirebaseConfig = Boolean(
   firebaseConfig.apiKey &&
@@ -52,6 +62,8 @@ export const getFirebaseApp = (): FirebaseApp => {
     );
   }
 };
+
+export const getFirebaseAuth = () => getAuth(getFirebaseApp());
 
 export const getFirebaseDb = () => getFirestore(getFirebaseApp());
 

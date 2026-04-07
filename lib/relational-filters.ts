@@ -73,6 +73,49 @@ export const clearInvalidRelationalSelections = <T, K extends string>(
   return hasChanges ? nextFilters : filters;
 };
 
+export const autofillUniqueRelationalSelections = <T, K extends string>(
+  items: T[],
+  filters: Record<K, string>,
+  fieldConfigs: Record<K, RelationalFieldConfig<T>>,
+  baseMatch?: (item: T) => boolean,
+) => {
+  const fields = getFields(fieldConfigs);
+
+  if (!fields.some((field) => Boolean(filters[field]?.trim()))) {
+    return filters;
+  }
+
+  const nextFilters = { ...filters };
+  let hasChanges = false;
+  let keepResolving = true;
+
+  while (keepResolving) {
+    keepResolving = false;
+
+    for (const field of fields) {
+      if (nextFilters[field]) {
+        continue;
+      }
+
+      const options = getRelationalOptions(
+        items,
+        nextFilters,
+        field,
+        fieldConfigs,
+        baseMatch,
+      );
+
+      if (options.length === 1) {
+        nextFilters[field] = options[0];
+        hasChanges = true;
+        keepResolving = true;
+      }
+    }
+  }
+
+  return hasChanges ? nextFilters : filters;
+};
+
 export const areStringFiltersEqual = <T extends Record<string, string>>(
   left: T,
   right: T,

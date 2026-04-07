@@ -26,8 +26,8 @@ const tabs: DashboardHeaderTab[] = [
   },
   {
     id: "natural",
-    label: "Mercaderia al natural",
-    description: "Recepcion, stock entrante y control analitico.",
+    label: "Descargas",
+    description: "Recepcion, ingreso neto y control analitico asociado.",
   },
   {
     id: "samples",
@@ -36,7 +36,18 @@ const tabs: DashboardHeaderTab[] = [
   },
 ];
 
-export const DashboardApp = () => {
+interface DashboardAppProps {
+  sessionName?: string | null;
+  sessionEmail?: string | null;
+  sessionWarning?: string | null;
+  onSignOut: () => void;
+}
+
+export const DashboardApp = ({
+  sessionName,
+  sessionEmail,
+  onSignOut,
+}: DashboardAppProps) => {
   const [activeTab, setActiveTab] = useState<DashboardTab>("defects");
   const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
   const [previousTab, setPreviousTab] = useState<DashboardTab | null>(null);
@@ -197,6 +208,9 @@ export const DashboardApp = () => {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
   };
 
+  const sessionLabel =
+    sessionName?.trim() || sessionEmail?.trim() || "Sesion Firebase activa";
+
   return (
     <main
       className={classNames(
@@ -215,6 +229,8 @@ export const DashboardApp = () => {
         isSwitching={isSwitching}
         themeMode={themeMode}
         onToggleTheme={handleThemeToggle}
+        sessionLabel={sessionLabel}
+        onSignOut={onSignOut}
       />
 
       <section className="workspace">

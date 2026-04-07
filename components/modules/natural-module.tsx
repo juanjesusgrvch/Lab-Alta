@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Bar,
@@ -19,32 +19,47 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  Eye,
+  EyeOff,
   Pencil,
   Plus,
   Trash2,
   X,
 } from "lucide-react";
 
-import {
-  MetricCard,
-  SectionCard,
-  StatusPill,
-} from "@/components/dashboard/primitives";
+import { MetricCard, SectionCard } from "@/components/dashboard/primitives";
 import {
   formatDate,
   formatInteger,
   formatKg,
   getTodayInBuenosAires,
 } from "@/lib/format";
-import { initialNaturalEntries } from "@/lib/mock-data";
+import { getFirebaseAuth } from "@/lib/firebase";
+import {
+  createRecord,
+  deleteRecord,
+  saveRecord,
+  subscribeToRecords,
+} from "@/lib/firestore-records";
 import { exportElementToPdf } from "@/lib/pdf";
 import {
+  createPackagingMovement,
+  formatPackagingSummary,
+  normalizePackagingMovement,
+  normalizePackagingText,
+  packagingConditionOptions,
+  packagingTypeOptions,
+  type PackagingMovementRecord,
+  type PackagingMovementType,
+} from "@/lib/packaging";
+import {
+  autofillUniqueRelationalSelections,
   areStringFiltersEqual,
   clearInvalidRelationalSelections,
   getRelationalOptions,
   type RelationalFieldConfig,
 } from "@/lib/relational-filters";
-import type { NaturalEntry } from "@/types/domain";
+import type { NaturalEntry, PackagingMovement } from "@/types/domain";
 
 const chartColors = [
   "var(--chart-accent-1)",
@@ -66,13 +81,20 @@ type NaturalFormState = {
   withAnalysis: boolean;
   analysisCode: string;
   observations: string;
+  packagingMovements: PackagingMovementRecord[];
 };
 
 type NaturalRelationalFilters = {
   client: string;
+  supplier: string;
   product: string;
   processCode: string;
 };
+
+type NaturalFormRelations = Pick<
+  NaturalFormState,
+  "client" | "supplier" | "product" | "processCode" | "analysisCode"
+>;
 
 type MonthlyScatterPoint = {
   day: number;
@@ -88,6 +110,10 @@ const naturalFilterConfig: Record<
     getValues: (entry) => [entry.client],
     matches: (entry, value) => entry.client === value,
   },
+  supplier: {
+    getValues: (entry) => [entry.supplier],
+    matches: (entry, value) => entry.supplier === value,
+  },
   product: {
     getValues: (entry) => [entry.product],
     matches: (entry, value) => entry.product === value,
@@ -95,6 +121,32 @@ const naturalFilterConfig: Record<
   processCode: {
     getValues: (entry) => [entry.processCode],
     matches: (entry, value) => entry.processCode === value,
+  },
+};
+
+const naturalFormRelationConfig: Record<
+  keyof NaturalFormRelations,
+  RelationalFieldConfig<NaturalEntry>
+> = {
+  client: {
+    getValues: (entry) => [entry.client],
+    matches: (entry, value) => entry.client === value,
+  },
+  supplier: {
+    getValues: (entry) => [entry.supplier],
+    matches: (entry, value) => entry.supplier === value,
+  },
+  product: {
+    getValues: (entry) => [entry.product],
+    matches: (entry, value) => entry.product === value,
+  },
+  processCode: {
+    getValues: (entry) => [entry.processCode],
+    matches: (entry, value) => entry.processCode === value,
+  },
+  analysisCode: {
+    getValues: (entry) => [entry.analysisCode ?? ""],
+    matches: (entry, value) => (entry.analysisCode ?? "") === value,
   },
 };
 
@@ -111,6 +163,7 @@ const createEmptyForm = (): NaturalFormState => ({
   withAnalysis: false,
   analysisCode: "",
   observations: "",
+  packagingMovements: [createPackagingMovement("alta")],
 });
 
 const formFromEntry = (entry: NaturalEntry): NaturalFormState => ({
@@ -123,6 +176,14 @@ const formFromEntry = (entry: NaturalEntry): NaturalFormState => ({
   withAnalysis: entry.withAnalysis,
   analysisCode: entry.analysisCode ?? "",
   observations: entry.observations ?? entry.analysisSummary?.notes ?? "",
+  packagingMovements: entry.packagingMovements?.length
+    ? entry.packagingMovements.map((movement, index) =>
+        normalizePackagingMovement(
+          movement,
+          movement.id?.trim() || `PKG-${entry.id}-${index + 1}`,
+        ),
+      )
+    : [createPackagingMovement("alta")],
 });
 
 const getMonthKey = (value: string) => value.slice(0, 7);
@@ -149,9 +210,10 @@ const formatMonthLabel = (monthKey: string) => {
 };
 
 const getDayTicks = (daysInMonth: number) => {
-  const ticks = Array.from({ length: daysInMonth }, (_, index) => index + 1).filter(
-    (day) => day === 1 || day === daysInMonth || day % 5 === 0,
-  );
+  const ticks = Array.from(
+    { length: daysInMonth },
+    (_, index) => index + 1,
+  ).filter((day) => day === 1 || day === daysInMonth || day % 5 === 0);
 
   if (!ticks.includes(daysInMonth)) {
     ticks.push(daysInMonth);
@@ -162,6 +224,31 @@ const getDayTicks = (daysInMonth: number) => {
 
 const formatChartKg = (value: number) =>
   value >= 1000 ? `${Math.round(value / 1000)}k` : `${value}`;
+
+const normalizeNaturalEntry = (
+  recordId: string,
+  entry: Partial<NaturalEntry>,
+): NaturalEntry => ({
+  id: entry.id?.trim() || recordId,
+  entryDate: entry.entryDate ?? getTodayInBuenosAires(),
+  truckPlate: entry.truckPlate ?? "",
+  client: entry.client ?? "",
+  supplier: entry.supplier ?? "",
+  product: entry.product ?? "",
+  processCode: entry.processCode ?? "",
+  grossKg: Number(entry.grossKg ?? entry.netKg ?? 0),
+  tareKg: Number(entry.tareKg ?? 0),
+  netKg: Number(entry.netKg ?? 0),
+  withAnalysis: Boolean(entry.withAnalysis),
+  analysisCode: entry.analysisCode ?? "",
+  observations: entry.observations ?? "",
+  packagingMovements: Array.isArray(entry.packagingMovements)
+    ? entry.packagingMovements.map((movement, index) =>
+        normalizePackagingMovement(movement, `PKG-${recordId}-${index + 1}`),
+      )
+    : [],
+  analysisSummary: entry.analysisSummary,
+});
 
 const getLatestMonthKey = (entries: NaturalEntry[]) =>
   getMonthKey(
@@ -189,18 +276,23 @@ const NaturalScatterTooltip = ({
       </span>
       <div className="natural-chart-tooltip__values">
         {point.loads.map((load, index) => (
-          <p key={`${point.day}-${index}`}>{`Ingreso ${index + 1}: ${formatKg(load)}`}</p>
+          <p
+            key={`${point.day}-${index}`}
+          >{`Ingreso ${index + 1}: ${formatKg(load)}`}</p>
         ))}
       </div>
-      {point.loads.length > 1 ? <p>{`Total: ${formatKg(point.netKg)}`}</p> : null}
+      {point.loads.length > 1 ? (
+        <p>{`Total: ${formatKg(point.netKg)}`}</p>
+      ) : null}
     </div>
   );
 };
 
 export const NaturalModule = () => {
-  const [entries, setEntries] = useState(initialNaturalEntries);
+  const [entries, setEntries] = useState<NaturalEntry[]>([]);
   const [filters, setFilters] = useState({
     client: "",
+    supplier: "",
     product: "",
     processCode: "",
     onlyWithAnalysis: false,
@@ -212,13 +304,40 @@ export const NaturalModule = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [hasMounted, setHasMounted] = useState(false);
   const [activeMonthKey, setActiveMonthKey] = useState(() =>
-    getLatestMonthKey(initialNaturalEntries),
+    getMonthKey(getTodayInBuenosAires()),
   );
-  const [isPending, startTransition] = useTransition();
+  const [isSyncing, setIsSyncing] = useState(true);
+  const [isPersisting, setIsPersisting] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setHasMounted(true);
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToRecords<NaturalEntry>(
+      "downloads",
+      (records) => {
+        const nextEntries = records.map((record) =>
+          normalizeNaturalEntry(record.id, record.data),
+        );
+
+        setEntries(nextEntries);
+        setIsSyncing(false);
+        setSyncError(null);
+      },
+      () => {
+        setEntries([]);
+        setIsSyncing(false);
+        setSyncError(
+          "No se pudo sincronizar la coleccion de descargas con Firestore.",
+        );
+      },
+    );
+
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -247,6 +366,7 @@ export const NaturalModule = () => {
     setCurrentPage(1);
   }, [
     filters.client,
+    filters.supplier,
     filters.product,
     filters.processCode,
     filters.onlyWithAnalysis,
@@ -254,12 +374,15 @@ export const NaturalModule = () => {
 
   const relationalFilters: NaturalRelationalFilters = {
     client: filters.client,
+    supplier: filters.supplier,
     product: filters.product,
     processCode: filters.processCode,
   };
 
-  const matchesAnalysisFilter = (entry: NaturalEntry, onlyWithAnalysis: boolean) =>
-    !onlyWithAnalysis || entry.withAnalysis;
+  const matchesAnalysisFilter = (
+    entry: NaturalEntry,
+    onlyWithAnalysis: boolean,
+  ) => !onlyWithAnalysis || entry.withAnalysis;
 
   const clientOptions = getRelationalOptions(
     entries,
@@ -272,6 +395,13 @@ export const NaturalModule = () => {
     entries,
     relationalFilters,
     "product",
+    naturalFilterConfig,
+    (entry) => matchesAnalysisFilter(entry, filters.onlyWithAnalysis),
+  );
+  const supplierOptions = getRelationalOptions(
+    entries,
+    relationalFilters,
+    "supplier",
     naturalFilterConfig,
     (entry) => matchesAnalysisFilter(entry, filters.onlyWithAnalysis),
   );
@@ -298,11 +428,50 @@ export const NaturalModule = () => {
   const allAnalysisCodes = Array.from(
     new Set(entries.map((entry) => entry.analysisCode).filter(Boolean)),
   ).sort();
+  const formRelations: NaturalFormRelations = {
+    client: form.client,
+    supplier: form.supplier,
+    product: form.product,
+    processCode: form.processCode,
+    analysisCode: form.analysisCode,
+  };
+  const formClientOptions = getRelationalOptions(
+    entries,
+    formRelations,
+    "client",
+    naturalFormRelationConfig,
+  );
+  const formSupplierOptions = getRelationalOptions(
+    entries,
+    formRelations,
+    "supplier",
+    naturalFormRelationConfig,
+  );
+  const formProductOptions = getRelationalOptions(
+    entries,
+    formRelations,
+    "product",
+    naturalFormRelationConfig,
+  );
+  const formProcessOptions = getRelationalOptions(
+    entries,
+    formRelations,
+    "processCode",
+    naturalFormRelationConfig,
+  );
+  const formAnalysisOptions = getRelationalOptions(
+    entries,
+    formRelations,
+    "analysisCode",
+    naturalFormRelationConfig,
+    (entry) => entry.withAnalysis,
+  );
 
   useEffect(() => {
     setFilters((current) => {
       const currentRelational: NaturalRelationalFilters = {
         client: current.client,
+        supplier: current.supplier,
         product: current.product,
         processCode: current.processCode,
       };
@@ -325,6 +494,7 @@ export const NaturalModule = () => {
   }, [
     entries,
     filters.client,
+    filters.supplier,
     filters.product,
     filters.processCode,
     filters.onlyWithAnalysis,
@@ -332,12 +502,16 @@ export const NaturalModule = () => {
 
   const filteredEntries = entries.filter((entry) => {
     const matchesClient = !filters.client || entry.client === filters.client;
-    const matchesProduct = !filters.product || entry.product === filters.product;
+    const matchesSupplier =
+      !filters.supplier || entry.supplier === filters.supplier;
+    const matchesProduct =
+      !filters.product || entry.product === filters.product;
     const matchesProcess =
       !filters.processCode || entry.processCode === filters.processCode;
 
     return (
       matchesClient &&
+      matchesSupplier &&
       matchesProduct &&
       matchesProcess &&
       matchesAnalysisFilter(entry, filters.onlyWithAnalysis)
@@ -368,7 +542,9 @@ export const NaturalModule = () => {
     (accumulator, entry) => accumulator + entry.netKg,
     0,
   );
-  const analyzedEntries = filteredEntries.filter((entry) => entry.withAnalysis).length;
+  const analyzedEntries = filteredEntries.filter(
+    (entry) => entry.withAnalysis,
+  ).length;
 
   const inboundByProductMap = new Map<string, number>();
   filteredEntries.forEach((entry) => {
@@ -435,6 +611,20 @@ export const NaturalModule = () => {
     setIsModalOpen(true);
   };
 
+  const toggleExpandedEntry = (entryId: string) => {
+    setExpandedEntryId((current) => (current === entryId ? null : entryId));
+  };
+
+  const handleExpandableCardKeyDown = (
+    event: React.KeyboardEvent<HTMLElement>,
+    entryId: string,
+  ) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleExpandedEntry(entryId);
+    }
+  };
+
   const closeCreateModal = () => {
     setIsModalOpen(false);
     setEditingEntryId(null);
@@ -467,6 +657,10 @@ export const NaturalModule = () => {
         };
       }
 
+      if (field === "packagingMovements") {
+        return current;
+      }
+
       const normalizedValue =
         typeof value === "string" ? normalizeUppercaseValue(value) : value;
 
@@ -481,44 +675,167 @@ export const NaturalModule = () => {
     });
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    startTransition(() => {
-      const nextEntry: NaturalEntry = {
-        id: editingEntryId ?? `ING-${Date.now()}`,
-        entryDate: form.entryDate,
-        truckPlate: "",
-        client: form.client.trim(),
-        supplier: form.supplier.trim(),
-        product: form.product.trim(),
-        processCode: form.processCode.trim(),
-        grossKg: form.netKg,
-        tareKg: 0,
-        netKg: form.netKg,
-        withAnalysis: form.withAnalysis,
-        analysisCode: form.withAnalysis ? form.analysisCode.trim() : "",
-        observations: form.observations.trim(),
-      };
-
-      setEntries((current) => {
-        if (!editingEntryId) {
-          return [nextEntry, ...current];
+  const handlePackagingMovementChange = (
+    movementId: string,
+    field: keyof PackagingMovement,
+    value: string | number,
+  ) => {
+    setForm((current) => ({
+      ...current,
+      packagingMovements: current.packagingMovements.map((movement) => {
+        if (movement.id !== movementId) {
+          return movement;
         }
 
-        return current.map((entry) =>
-          entry.id === editingEntryId ? nextEntry : entry,
+        if (field === "quantity") {
+          return {
+            ...movement,
+            quantity: Math.max(0, Number(value) || 0),
+          };
+        }
+
+        if (field === "movementType") {
+          return {
+            ...movement,
+            movementType: value === "baja" ? "baja" : "alta",
+          };
+        }
+
+        return {
+          ...movement,
+          [field]: normalizePackagingText(String(value)),
+        };
+      }),
+    }));
+  };
+
+  useEffect(() => {
+    if (!isModalOpen) {
+      return;
+    }
+
+    setForm((current) => {
+      const currentRelations: NaturalFormRelations = {
+        client: current.client,
+        supplier: current.supplier,
+        product: current.product,
+        processCode: current.processCode,
+        analysisCode: current.analysisCode,
+      };
+      const autofilledRelations = autofillUniqueRelationalSelections(
+        entries,
+        currentRelations,
+        naturalFormRelationConfig,
+        current.withAnalysis ? (entry) => entry.withAnalysis : undefined,
+      );
+      const nextForm = {
+        ...current,
+        ...autofilledRelations,
+      };
+      const changed = !areStringFiltersEqual(
+        currentRelations,
+        autofilledRelations,
+      );
+
+      return changed ? nextForm : current;
+    });
+  }, [
+    isModalOpen,
+    entries,
+    form.client,
+    form.supplier,
+    form.product,
+    form.processCode,
+    form.analysisCode,
+    form.withAnalysis,
+  ]);
+
+  const handleAddPackagingMovement = (movementType: PackagingMovementType) => {
+    setForm((current) => ({
+      ...current,
+      packagingMovements: [
+        ...current.packagingMovements,
+        createPackagingMovement(movementType),
+      ],
+    }));
+  };
+
+  const handleRemovePackagingMovement = (movementId: string) => {
+    setForm((current) => {
+      const nextMovements = current.packagingMovements.filter(
+        (movement) => movement.id !== movementId,
+      );
+
+      return {
+        ...current,
+        packagingMovements: nextMovements.length
+          ? nextMovements
+          : [createPackagingMovement("alta")],
+      };
+    });
+  };
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const nextEntry: NaturalEntry = {
+      id: editingEntryId ?? `ING-${Date.now()}`,
+      entryDate: form.entryDate,
+      truckPlate: "",
+      client: form.client.trim(),
+      supplier: form.supplier.trim(),
+      product: form.product.trim(),
+      processCode: form.processCode.trim(),
+      grossKg: form.netKg,
+      tareKg: 0,
+      netKg: form.netKg,
+      withAnalysis: form.withAnalysis,
+      analysisCode: form.withAnalysis ? form.analysisCode.trim() : "",
+      observations: form.observations.trim(),
+      packagingMovements: form.packagingMovements
+        .map((movement, index) =>
+          normalizePackagingMovement(
+            movement,
+            movement.id || `PKG-${editingEntryId ?? Date.now()}-${index + 1}`,
+          ),
+        )
+        .filter((movement) => movement.quantity > 0),
+    };
+
+    setIsPersisting(true);
+    setSyncError(null);
+
+    try {
+      const currentUserId = getFirebaseAuth().currentUser?.uid;
+
+      if (editingEntryId) {
+        await saveRecord<NaturalEntry>(
+          "downloads",
+          editingEntryId,
+          nextEntry,
+          currentUserId,
         );
-      });
+      } else {
+        await createRecord<NaturalEntry>(
+          "downloads",
+          nextEntry.id,
+          nextEntry,
+          currentUserId,
+        );
+      }
 
       setCurrentPage(1);
       setActiveMonthKey(getMonthKey(form.entryDate));
       setForm(createEmptyForm());
       closeCreateModal();
-    });
+    } catch {
+      setSyncError("No se pudo guardar la descarga en Firestore.");
+    } finally {
+      setIsPersisting(false);
+    }
   };
 
-  const handleDeleteEntry = (entryId: string) => {
+  const handleDeleteEntry = async (entryId: string) => {
     const entry = entries.find((item) => item.id === entryId);
     const entryLabel = `${entry?.product ?? "REGISTRO"} / ${entry?.entryDate ?? entryId}`;
 
@@ -529,9 +846,16 @@ export const NaturalModule = () => {
       return;
     }
 
-    startTransition(() => {
-      setEntries((current) => current.filter((entry) => entry.id !== entryId));
-    });
+    setIsPersisting(true);
+    setSyncError(null);
+
+    try {
+      await deleteRecord("downloads", entryId);
+    } catch {
+      setSyncError("No se pudo eliminar la descarga en Firestore.");
+    } finally {
+      setIsPersisting(false);
+    }
   };
 
   const handleExport = async () => {
@@ -550,43 +874,20 @@ export const NaturalModule = () => {
 
   return (
     <div ref={panelRef} className="module-stack">
-      <div className="module-header">
-        <div>
-          <span className="eyebrow">Modulo 2</span>
-          <h3>Recepcion de mercaderia al natural</h3>
-          <p>
-            Descargas recientes, stock en planta y seguimiento rapido del analisis
-            asociado.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="ghost-button"
-          onClick={handleExport}
-          disabled={isExporting}
-        >
-          <Download size={16} />
-          {isExporting ? "Generando..." : "Exportar PDF"}
-        </button>
-      </div>
-
       <div className="metric-grid samples-metric-grid">
         <MetricCard
           label="Registro de descargas"
           value={formatInteger(filteredEntries.length)}
-          caption="Ingresos visibles con la combinacion actual de filtros."
           tone="sand"
         />
         <MetricCard
           label="Stock en planta"
           value={formatKg(totalNetKg)}
-          caption="Suma neta de mercaderia al natural actualmente visible."
           tone="olive"
         />
         <MetricCard
           label="Analisis realizados"
           value={formatInteger(analyzedEntries)}
-          caption="Descargas que ya tienen analisis asociado."
           tone="forest"
         />
         <button
@@ -595,31 +896,64 @@ export const NaturalModule = () => {
           onClick={openCreateModal}
         >
           <span>Nuevo ingreso</span>
-          <strong>Abrir formulario</strong>
-          <p>Carga una nueva descarga y registra el codigo de analisis si aplica.</p>
+          <strong>Agregar</strong>
           <div className="metric-card-button__icon">
             <Plus size={18} />
           </div>
         </button>
       </div>
 
-      <section className="card samples-filters-card">
+      <SectionCard
+        title="FILTROS"
+        action={
+          <button
+            type="button"
+            className="text-button"
+            onClick={() =>
+              setFilters({
+                client: "",
+                supplier: "",
+                product: "",
+                processCode: "",
+                onlyWithAnalysis: false,
+              })
+            }
+          >
+            Limpiar
+          </button>
+        }
+        className="samples-filters-card"
+      >
         <div className="samples-filters-bar natural-filters-bar">
-          <div className="samples-filters-bar__label">
-            <span className="eyebrow">Filtros</span>
-            <p>Cliente, proceso, producto y analisis.</p>
-          </div>
-
           <label className="samples-filter-field">
             Cliente
             <select
               value={filters.client}
-              onChange={(event) => handleFilterChange("client", event.target.value)}
+              onChange={(event) =>
+                handleFilterChange("client", event.target.value)
+              }
             >
               <option value="">Todos</option>
               {clientOptions.map((client) => (
                 <option key={client} value={client}>
                   {client}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="samples-filter-field">
+            Proveedor
+            <select
+              value={filters.supplier}
+              onChange={(event) =>
+                handleFilterChange("supplier", event.target.value)
+              }
+            >
+              <option value="">Todos</option>
+              {supplierOptions.map((supplier) => (
+                <option key={supplier} value={supplier}>
+                  {supplier}
                 </option>
               ))}
             </select>
@@ -646,7 +980,9 @@ export const NaturalModule = () => {
             Producto
             <select
               value={filters.product}
-              onChange={(event) => handleFilterChange("product", event.target.value)}
+              onChange={(event) =>
+                handleFilterChange("product", event.target.value)
+              }
             >
               <option value="">Todos</option>
               {productOptions.map((product) => (
@@ -667,106 +1003,163 @@ export const NaturalModule = () => {
             />
             <span>Solo con analisis</span>
           </label>
-
-          <button
-            type="button"
-            className="text-button samples-filters-bar__reset"
-            onClick={() =>
-              setFilters({
-                client: "",
-                product: "",
-                processCode: "",
-                onlyWithAnalysis: false,
-              })
-            }
-          >
-            Limpiar
-          </button>
         </div>
-      </section>
+      </SectionCard>
 
       <SectionCard
         title="Registro de descargas"
-        description="Ultimos 5 ingresos por pagina, ordenados desde la fecha mas reciente."
         action={
-          <span className="samples-list-count">
-            {formatInteger(sortedEntries.length)} registros
-          </span>
+          <div className="section-action-cluster">
+            <span className="samples-list-count">
+              {formatInteger(sortedEntries.length)} registros
+            </span>
+            <button
+              type="button"
+              className="icon-button compact-icon-button"
+              onClick={handleExport}
+              disabled={isExporting}
+              aria-label="Exportar descargas en PDF"
+              title="Exportar PDF"
+            >
+              <Download size={16} />
+            </button>
+          </div>
         }
       >
         <div className="samples-inventory-list">
           {paginatedEntries.length ? (
             paginatedEntries.map((entry) => (
-              <article key={entry.id} className="samples-record natural-record">
+              <article
+                key={entry.id}
+                className={`samples-record natural-record record-card--light${
+                  expandedEntryId === entry.id ? " is-expanded" : ""
+                }`}
+                role="button"
+                tabIndex={0}
+                aria-expanded={expandedEntryId === entry.id}
+                onClick={() => toggleExpandedEntry(entry.id)}
+                onKeyDown={(event) =>
+                  handleExpandableCardKeyDown(event, entry.id)
+                }
+              >
                 <div className="natural-record__header">
                   <div>
                     <div className="natural-record__title-line">
-                      <strong>{entry.product}</strong>
-                      <span className="natural-record__amount-inline">
-                        {formatKg(entry.netKg)}
-                      </span>
+                      <strong>{entry.product || "SIN PRODUCTO"}</strong>
                     </div>
                     <p>
-                      {entry.client} / {entry.supplier || "Sin proveedor"}
+                      {entry.client || "SIN CLIENTE"} /{" "}
+                      {entry.supplier || "SIN PROVEEDOR"}
+                    </p>
+                    <p className="record-card__summary">
+                      {formatKg(entry.netKg)} / {formatDate(entry.entryDate)}
                     </p>
                   </div>
 
                   <div className="natural-record__actions">
-                    <StatusPill
-                      value={entry.withAnalysis ? "Analisis si" : "Analisis no"}
-                      tone={entry.withAnalysis ? "good" : "warn"}
-                    />
                     <button
                       type="button"
-                      className="ghost-button compact-button"
-                      onClick={() => openEditModal(entry)}
+                      className="icon-button compact-icon-button compact-icon-button--view"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleExpandedEntry(entry.id);
+                      }}
+                      aria-label={
+                        expandedEntryId === entry.id
+                          ? "Ocultar detalle de la descarga"
+                          : "Ver detalle de la descarga"
+                      }
+                      title={
+                        expandedEntryId === entry.id
+                          ? "Ocultar detalle"
+                          : "Vista extendida"
+                      }
                     >
-                      <Pencil size={14} />
-                      Editar
+                      {expandedEntryId === entry.id ? (
+                        <EyeOff size={15} />
+                      ) : (
+                        <Eye size={15} />
+                      )}
                     </button>
                     <button
                       type="button"
-                      className="ghost-button compact-button danger-button"
-                      onClick={() => handleDeleteEntry(entry.id)}
+                      className="icon-button compact-icon-button compact-icon-button--edit"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openEditModal(entry);
+                      }}
+                      aria-label="Editar descarga"
+                      title="Editar"
                     >
-                      <Trash2 size={14} />
-                      Eliminar
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button compact-icon-button compact-icon-button--delete"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleDeleteEntry(entry.id);
+                      }}
+                      aria-label="Eliminar descarga"
+                      title="Eliminar"
+                    >
+                      <Trash2 size={15} />
                     </button>
                   </div>
                 </div>
 
-                <div className="samples-record__meta natural-record__meta">
-                  <div>
-                    <span>Fecha</span>
-                    <strong>{formatDate(entry.entryDate)}</strong>
-                  </div>
-                  <div>
-                    <span>Proceso</span>
-                    <strong>{entry.processCode || "Sin codigo"}</strong>
-                  </div>
-                  <div>
-                    <span>Codigo analisis</span>
-                    <strong>
-                      {entry.withAnalysis
-                        ? entry.analysisCode || "Sin codigo"
-                        : "No aplica"}
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Proveedor / campo</span>
-                    <strong>{entry.supplier || "Sin dato"}</strong>
-                  </div>
-                </div>
+                {expandedEntryId === entry.id ? (
+                  <div className="record-card__extended">
+                    <div className="record-card__extended-grid">
+                      <div>
+                        <span>Proceso</span>
+                        <strong>{entry.processCode || "Sin proceso"}</strong>
+                      </div>
+                      <div>
+                        <span>Codigo analisis</span>
+                        <strong>
+                          {entry.withAnalysis
+                            ? entry.analysisCode || "Sin codigo"
+                            : "No aplica"}
+                        </strong>
+                      </div>
+                    </div>
 
-                {entry.observations ? (
-                  <p className="samples-record__notes">{entry.observations}</p>
+                    <div className="record-card__extended-grid">
+                      {entry.packagingMovements?.length ? (
+                        entry.packagingMovements.map((movement) => (
+                          <div key={movement.id}>
+                            <span>Envases</span>
+                            <strong>
+                              {movement.quantity}{" "}
+                              {movement.packagingType.toLowerCase()}{" "}
+                              {movement.packagingCondition.toLowerCase()}
+                            </strong>
+                          </div>
+                        ))
+                      ) : (
+                        <div>
+                          <span>Envases</span>
+                          <strong>Sin envases cargados</strong>
+                        </div>
+                      )}
+                    </div>
+
+                    {entry.observations ? (
+                      <p className="samples-record__notes">
+                        {entry.observations}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </article>
             ))
           ) : (
             <div className="samples-empty-state">
               <strong>Sin descargas para esta vista</strong>
-              <p>Ajusta los filtros o registra un nuevo ingreso desde el modal.</p>
+              <p>
+                Ajusta los filtros o registra un nuevo ingreso desde el modal.
+              </p>
             </div>
           )}
         </div>
@@ -801,10 +1194,7 @@ export const NaturalModule = () => {
       </SectionCard>
 
       <div className="module-grid natural-analytics-grid">
-        <SectionCard
-          title="Ingreso kg netos por producto"
-          description="Comparacion horizontal de kilos netos por producto."
-        >
+        <SectionCard title="Ingreso kg netos por producto">
           <div className="chart-shell natural-chart-shell">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
@@ -828,7 +1218,9 @@ export const NaturalModule = () => {
                   width={110}
                   stroke={chartAxisColor}
                 />
-                <Tooltip formatter={(value: number) => [formatKg(value), "Kg netos"]} />
+                <Tooltip
+                  formatter={(value: number) => [formatKg(value), "Kg netos"]}
+                />
                 <Bar dataKey="netKg" radius={[0, 6, 6, 0]} barSize={18}>
                   {inboundByProduct.map((entry, index) => (
                     <Cell
@@ -844,13 +1236,14 @@ export const NaturalModule = () => {
 
         <SectionCard
           title="Descargas por fecha"
-          description="Puntos diarios del mes activo, sin lineas de conexion."
           action={
             <div className="natural-month-nav">
               <button
                 type="button"
                 className="ghost-button compact-button"
-                onClick={() => setActiveMonthKey((current) => shiftMonthKey(current, -1))}
+                onClick={() =>
+                  setActiveMonthKey((current) => shiftMonthKey(current, -1))
+                }
                 aria-label="Mes anterior"
               >
                 <ChevronLeft size={16} />
@@ -859,7 +1252,9 @@ export const NaturalModule = () => {
               <button
                 type="button"
                 className="ghost-button compact-button"
-                onClick={() => setActiveMonthKey((current) => shiftMonthKey(current, 1))}
+                onClick={() =>
+                  setActiveMonthKey((current) => shiftMonthKey(current, 1))
+                }
                 aria-label="Mes siguiente"
               >
                 <ChevronRight size={16} />
@@ -922,9 +1317,10 @@ export const NaturalModule = () => {
                       {editingEntryId ? "Editar ingreso" : "Nuevo ingreso"}
                     </span>
                     <h3 id="natural-modal-title">
-                      {editingEntryId ? "Editar descarga" : "Registrar descarga"}
+                      {editingEntryId
+                        ? "Editar descarga"
+                        : "Registrar descarga"}
                     </h3>
-                    <p>Formulario corto para stock neto, proceso, analisis y observaciones.</p>
                   </div>
 
                   <button
@@ -936,7 +1332,7 @@ export const NaturalModule = () => {
                     <X size={16} />
                   </button>
                 </div>
- 
+
                 <form className="stack-form" onSubmit={handleSubmit}>
                   <div className="form-grid two-columns">
                     <div className="stack-form">
@@ -983,7 +1379,10 @@ export const NaturalModule = () => {
                           required
                           value={form.netKg}
                           onChange={(event) =>
-                            handleFormChange("netKg", Number(event.target.value))
+                            handleFormChange(
+                              "netKg",
+                              Number(event.target.value),
+                            )
                           }
                         />
                       </label>
@@ -1017,7 +1416,10 @@ export const NaturalModule = () => {
                           type="checkbox"
                           checked={form.withAnalysis}
                           onChange={(event) =>
-                            handleFormChange("withAnalysis", event.target.checked)
+                            handleFormChange(
+                              "withAnalysis",
+                              event.target.checked,
+                            )
                           }
                         />
                         <span>Analisis</span>
@@ -1037,6 +1439,133 @@ export const NaturalModule = () => {
                       </label>
                     </div>
                   </div>
+
+                  <section className="subsection natural-packaging-section">
+                    <div className="card-heading">
+                      <div>
+                        <h3>Envases</h3>
+                      </div>
+
+                      <div className="natural-record__actions">
+                        <button
+                          type="button"
+                          className="ghost-button compact-button"
+                          onClick={() => handleAddPackagingMovement("alta")}
+                        >
+                          <Plus size={14} />
+                          Agregar otro envase
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button compact-button"
+                          onClick={() => handleAddPackagingMovement("baja")}
+                        >
+                          <Plus size={14} />
+                          Agregar una baja
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="natural-packaging-list">
+                      {form.packagingMovements.map((movement) => (
+                        <div
+                          key={movement.id}
+                          className={`natural-packaging-row${
+                            movement.movementType === "baja"
+                              ? " natural-packaging-row--out"
+                              : ""
+                          }`}
+                        >
+                          <label>
+                            Movimiento
+                            <select
+                              value={movement.movementType}
+                              onChange={(event) =>
+                                handlePackagingMovementChange(
+                                  movement.id,
+                                  "movementType",
+                                  event.target.value,
+                                )
+                              }
+                            >
+                              <option value="alta">Ingreso</option>
+                              <option value="baja">Baja</option>
+                            </select>
+                          </label>
+
+                          <label>
+                            Tipo de envase
+                            <select
+                              value={movement.packagingType}
+                              onChange={(event) =>
+                                handlePackagingMovementChange(
+                                  movement.id,
+                                  "packagingType",
+                                  event.target.value,
+                                )
+                              }
+                            >
+                              {packagingTypeOptions.map((packagingType) => (
+                                <option
+                                  key={packagingType}
+                                  value={packagingType}
+                                >
+                                  {packagingType}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <label>
+                            Estado
+                            <select
+                              value={movement.packagingCondition}
+                              onChange={(event) =>
+                                handlePackagingMovementChange(
+                                  movement.id,
+                                  "packagingCondition",
+                                  event.target.value,
+                                )
+                              }
+                            >
+                              {packagingConditionOptions.map((condition) => (
+                                <option key={condition} value={condition}>
+                                  {condition}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <label>
+                            Cantidad
+                            <input
+                              type="number"
+                              min="0"
+                              value={movement.quantity}
+                              onChange={(event) =>
+                                handlePackagingMovementChange(
+                                  movement.id,
+                                  "quantity",
+                                  Number(event.target.value),
+                                )
+                              }
+                            />
+                          </label>
+
+                          <button
+                            type="button"
+                            className="ghost-button compact-button danger-button"
+                            onClick={() =>
+                              handleRemovePackagingMovement(movement.id)
+                            }
+                          >
+                            <Trash2 size={14} />
+                            Quitar
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
 
                   <label>
                     Observaciones
@@ -1061,9 +1590,9 @@ export const NaturalModule = () => {
                     <button
                       type="submit"
                       className="primary-button"
-                      disabled={isPending}
+                      disabled={isPersisting}
                     >
-                      {isPending
+                      {isPersisting
                         ? "Guardando..."
                         : editingEntryId
                           ? "Guardar cambios"
@@ -1073,33 +1602,53 @@ export const NaturalModule = () => {
                 </form>
 
                 <datalist id="natural-client-options">
-                  {allClientOptions.map((client) => (
-                    <option key={client} value={client} />
-                  ))}
+                  {formClientOptions.length
+                    ? formClientOptions.map((client) => (
+                        <option key={client} value={client} />
+                      ))
+                    : allClientOptions.map((client) => (
+                        <option key={client} value={client} />
+                      ))}
                 </datalist>
 
                 <datalist id="natural-product-options">
-                  {allProductOptions.map((product) => (
-                    <option key={product} value={product} />
-                  ))}
+                  {formProductOptions.length
+                    ? formProductOptions.map((product) => (
+                        <option key={product} value={product} />
+                      ))
+                    : allProductOptions.map((product) => (
+                        <option key={product} value={product} />
+                      ))}
                 </datalist>
 
                 <datalist id="natural-supplier-options">
-                  {allSupplierOptions.map((supplier) => (
-                    <option key={supplier} value={supplier} />
-                  ))}
+                  {formSupplierOptions.length
+                    ? formSupplierOptions.map((supplier) => (
+                        <option key={supplier} value={supplier} />
+                      ))
+                    : allSupplierOptions.map((supplier) => (
+                        <option key={supplier} value={supplier} />
+                      ))}
                 </datalist>
 
                 <datalist id="natural-process-options">
-                  {allProcessOptions.map((processCode) => (
-                    <option key={processCode} value={processCode} />
-                  ))}
+                  {formProcessOptions.length
+                    ? formProcessOptions.map((processCode) => (
+                        <option key={processCode} value={processCode} />
+                      ))
+                    : allProcessOptions.map((processCode) => (
+                        <option key={processCode} value={processCode} />
+                      ))}
                 </datalist>
 
                 <datalist id="natural-analysis-options">
-                  {allAnalysisCodes.map((analysisCode) => (
-                    <option key={analysisCode} value={analysisCode} />
-                  ))}
+                  {formAnalysisOptions.length
+                    ? formAnalysisOptions.map((analysisCode) => (
+                        <option key={analysisCode} value={analysisCode} />
+                      ))
+                    : allAnalysisCodes.map((analysisCode) => (
+                        <option key={analysisCode} value={analysisCode} />
+                      ))}
                 </datalist>
               </div>
             </div>,

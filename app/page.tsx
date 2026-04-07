@@ -1,5 +1,5 @@
-import { DashboardApp } from "@/components/dashboard/dashboard-app";
+import { AppAccess } from "@/components/auth/app-access";
 
 export default function HomePage() {
-  return <DashboardApp />;
+  return <AppAccess />;
 }
