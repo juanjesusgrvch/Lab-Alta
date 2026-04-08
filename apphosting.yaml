@@ -1,6 +1,16 @@
 # Firebase App Hosting:
 # - La configuracion web de Firebase se inyecta automaticamente en el build
 #   mediante FIREBASE_WEBAPP_CONFIG.
-# - No versionar secretos reales en este archivo.
-# - Si necesitas secretos de servidor, usa `secret:` con Cloud Secret Manager.
-env: []
+# - La site key de Turnstile es publica y debe estar disponible en BUILD
+#   y RUNTIME para que Next.js pueda renderizar el widget en el login.
+# - El secret de Turnstile vive solo en Cloud Secret Manager.
+env:
+  - variable: NEXT_PUBLIC_TURNSTILE_SITE_KEY
+    value: 0x4AAAAAAC2ONQ6ycD47hTv0
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: TURNSTILE_SECRET_KEY
+    secret: TURNSTILE_SECRET_KEY
+    availability:
+      - RUNTIME

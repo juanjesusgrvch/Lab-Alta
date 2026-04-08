@@ -10,6 +10,7 @@ interface LoginScreenProps {
   isSubmitting: boolean;
   errorMessage: string | null;
   infoMessage: string | null;
+  turnstileSiteKey: string;
   onGoogleAccess: () => Promise<void>;
   onEmailAccess: (
     email: string,
@@ -23,6 +24,7 @@ export const LoginScreen = ({
   isSubmitting,
   errorMessage,
   infoMessage,
+  turnstileSiteKey,
   onGoogleAccess,
   onEmailAccess,
   onPasswordReset,
@@ -32,8 +34,6 @@ export const LoginScreen = ({
   const [turnstileToken, setTurnstileToken] = useState("");
   const [turnstileError, setTurnstileError] = useState<string | null>(null);
   const [turnstileRenderKey, setTurnstileRenderKey] = useState(0);
-  const turnstileSiteKey =
-    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() ?? "";
 
   const resetTurnstileChallenge = () => {
     setTurnstileToken("");
@@ -142,8 +142,8 @@ export const LoginScreen = ({
               />
             ) : (
               <p className="auth-message auth-message--error">
-                Falta configurar `NEXT_PUBLIC_TURNSTILE_SITE_KEY` para habilitar
-                el acceso protegido.
+                No se pudo inicializar la verificacion de seguridad para este
+                entorno.
               </p>
             )}
 

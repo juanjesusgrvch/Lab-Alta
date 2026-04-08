@@ -112,7 +112,11 @@ const requestSecureEmailLogin = async (
   };
 };
 
-export const AppAccess = () => {
+interface AppAccessProps {
+  turnstileSiteKey: string;
+}
+
+export const AppAccess = ({ turnstileSiteKey }: AppAccessProps) => {
   const [sessionUser, setSessionUser] = useState<User | null | undefined>(
     undefined,
   );
@@ -250,6 +254,7 @@ export const AppAccess = () => {
         isSubmitting={isSubmitting}
         errorMessage={errorMessage}
         infoMessage={infoMessage}
+        turnstileSiteKey={turnstileSiteKey}
         onGoogleAccess={handleGoogleAccess}
         onEmailAccess={handleEmailAccess}
         onPasswordReset={handlePasswordReset}
