@@ -17,7 +17,7 @@ export interface DefectAnalysis {
   sampleWeightGr: number;
   relatedAnalysis: string;
   outputStage: string;
-  gramajeHundredths: number;
+  gramajeHundredths: number | null;
   humidity: number;
   defects: DefectItem[];
   observations: string;
@@ -69,8 +69,10 @@ export interface StoredSample {
   relatedAnalysisId: string;
   warehouseZone: string;
   shelf: string;
+  gramajeHundredths: number | null;
   quantityKg: number;
   retentionUntil: string;
   status: "Activa" | "Liberada" | "Vencida";
+  releasedAt?: string | null;
   notes: string;
 }

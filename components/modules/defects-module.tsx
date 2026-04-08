@@ -59,6 +59,8 @@ import {
   getRelationalOptions,
   type RelationalFieldConfig,
 } from "@/lib/relational-filters";
+import type { DashboardDataMode } from "@/lib/dashboard-data-mode";
+import { createDemoDefectAnalyses } from "@/lib/demo-data";
 import type { DefectAnalysis, DefectItem } from "@/types/domain";
 
 const chartColors = [
@@ -197,7 +199,9 @@ const formFromAnalysis = (analysis: DefectAnalysis): DefectFormState => ({
   relatedAnalysis: analysis.relatedAnalysis ?? "",
   outputStage: analysis.outputStage ?? "",
   gramajeHundredths:
-    analysis.gramajeHundredths > 0 ? String(analysis.gramajeHundredths) : "",
+    (analysis.gramajeHundredths ?? 0) > 0
+      ? String(analysis.gramajeHundredths)
+      : "",
   humidity: analysis.humidity > 0 ? String(analysis.humidity) : "",
   observations: analysis.observations ?? "",
   defects:
@@ -422,8 +426,15 @@ const formRelationConfig = {
   RelationalFieldConfig<DefectAnalysis>
 >;
 
-export const DefectsModule = () => {
-  const [analyses, setAnalyses] = useState<DefectAnalysis[]>([]);
+interface DefectsModuleProps {
+  dataMode?: DashboardDataMode;
+}
+
+export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
+  const isDemoMode = dataMode === "demo";
+  const [analyses, setAnalyses] = useState<DefectAnalysis[]>(() =>
+    isDemoMode ? createDemoDefectAnalyses().sort(sortAnalysesByRecency) : [],
+  );
   const [filters, setFilters] = useState<DefectFilters>({
     client: "",
     supplier: "",
@@ -448,7 +459,7 @@ export const DefectsModule = () => {
   const [hasMounted, setHasMounted] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isPersisting, setIsPersisting] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(!isDemoMode);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [expandedAnalysisId, setExpandedAnalysisId] = useState<string | null>(
@@ -461,6 +472,13 @@ export const DefectsModule = () => {
   }, []);
 
   useEffect(() => {
+    if (isDemoMode) {
+      setAnalyses(createDemoDefectAnalyses().sort(sortAnalysesByRecency));
+      setIsSyncing(false);
+      setSyncError(null);
+      return;
+    }
+
     const unsubscribe = subscribeToRecords<DefectAnalysis>(
       "defects",
       (records) => {
@@ -482,7 +500,7 @@ export const DefectsModule = () => {
     );
 
     return unsubscribe;
-  }, []);
+  }, [isDemoMode]);
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -667,13 +685,24 @@ export const DefectsModule = () => {
   );
   const averageSampleWeight =
     filteredAnalyses.length > 0 ? totalSampleGr / filteredAnalyses.length : 0;
+  const gramajeTotal = filteredAnalyses.reduce(
+    (sum, analysis) =>
+      sum +
+      (analysis.gramajeHundredths != null && analysis.gramajeHundredths > 0
+        ? analysis.gramajeHundredths
+        : 0),
+    0,
+  );
+  const gramajeCount = filteredAnalyses.reduce(
+    (count, analysis) =>
+      count +
+      (analysis.gramajeHundredths != null && analysis.gramajeHundredths > 0
+        ? 1
+        : 0),
+    0,
+  );
   const averageGramajeHundredths =
-    filteredAnalyses.length > 0
-      ? filteredAnalyses.reduce(
-          (sum, analysis) => sum + analysis.gramajeHundredths,
-          0,
-        ) / filteredAnalyses.length
-      : 0;
+    gramajeCount > 0 ? gramajeTotal / gramajeCount : 0;
   const totalDefectGrams = filteredAnalyses.reduce(
     (sum, analysis) =>
       sum +
@@ -1049,6 +1078,16 @@ export const DefectsModule = () => {
       return;
     }
 
+    if (isDemoMode) {
+      setAnalyses((current) =>
+        current.filter((analysis) => analysis.id !== analysisId),
+      );
+      setExpandedAnalysisId((current) =>
+        current === analysisId ? null : current,
+      );
+      return;
+    }
+
     try {
       await deleteRecord("defects", analysisId);
     } catch {
@@ -1134,9 +1173,28 @@ export const DefectsModule = () => {
     try {
       setIsPersisting(true);
       setFormError(null);
-      const currentUser = getFirebaseAuth().currentUser;
+      const timestamp = Date.now();
 
-      if (editingAnalysisId) {
+      if (isDemoMode) {
+        const recordId = editingAnalysisId ?? buildRecordId(form.analysisDate);
+        const nextAnalysis: DefectAnalysis = {
+          id: recordId,
+          ...payload,
+          createdAtMs: existingCreatedAtMs ?? timestamp,
+          updatedAtMs: timestamp,
+        };
+
+        setAnalyses((current) =>
+          editingAnalysisId
+            ? current
+                .map((analysis) =>
+                  analysis.id === editingAnalysisId ? nextAnalysis : analysis,
+                )
+                .sort(sortAnalysesByRecency)
+            : [nextAnalysis, ...current].sort(sortAnalysesByRecency),
+        );
+      } else if (editingAnalysisId) {
+        const currentUser = getFirebaseAuth().currentUser;
         await saveRecord(
           "defects",
           editingAnalysisId,
@@ -1144,6 +1202,7 @@ export const DefectsModule = () => {
           currentUser?.uid,
         );
       } else {
+        const currentUser = getFirebaseAuth().currentUser;
         const recordId = buildRecordId(form.analysisDate);
         await createRecord("defects", recordId, payload, currentUser?.uid);
       }
@@ -1466,7 +1525,7 @@ export const DefectsModule = () => {
                         <div>
                           <span>Gramaje</span>
                           <strong>
-                            {formatHundredths(analysis.gramajeHundredths)}
+                            {formatHundredths(analysis.gramajeHundredths ?? 0)}
                           </strong>
                         </div>
                         <div>

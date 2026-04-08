@@ -59,6 +59,8 @@ import {
   getRelationalOptions,
   type RelationalFieldConfig,
 } from "@/lib/relational-filters";
+import type { DashboardDataMode } from "@/lib/dashboard-data-mode";
+import { createDemoNaturalEntries } from "@/lib/demo-data";
 import type { NaturalEntry, PackagingMovement } from "@/types/domain";
 
 const chartColors = [
@@ -288,8 +290,15 @@ const NaturalScatterTooltip = ({
   );
 };
 
-export const NaturalModule = () => {
-  const [entries, setEntries] = useState<NaturalEntry[]>([]);
+interface NaturalModuleProps {
+  dataMode?: DashboardDataMode;
+}
+
+export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
+  const isDemoMode = dataMode === "demo";
+  const [entries, setEntries] = useState<NaturalEntry[]>(() =>
+    isDemoMode ? createDemoNaturalEntries() : [],
+  );
   const [filters, setFilters] = useState({
     client: "",
     supplier: "",
@@ -306,7 +315,7 @@ export const NaturalModule = () => {
   const [activeMonthKey, setActiveMonthKey] = useState(() =>
     getMonthKey(getTodayInBuenosAires()),
   );
-  const [isSyncing, setIsSyncing] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(!isDemoMode);
   const [isPersisting, setIsPersisting] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
@@ -317,6 +326,13 @@ export const NaturalModule = () => {
   }, []);
 
   useEffect(() => {
+    if (isDemoMode) {
+      setEntries(createDemoNaturalEntries());
+      setIsSyncing(false);
+      setSyncError(null);
+      return;
+    }
+
     const unsubscribe = subscribeToRecords<NaturalEntry>(
       "downloads",
       (records) => {
@@ -338,7 +354,7 @@ export const NaturalModule = () => {
     );
 
     return unsubscribe;
-  }, []);
+  }, [isDemoMode]);
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -701,6 +717,23 @@ export const NaturalModule = () => {
           };
         }
 
+        if (field === "packagingType") {
+          const newPackagingType = normalizePackagingText(String(value));
+          // Si el tipo de envase es GRANEL, limpiar condición y cantidad
+          if (newPackagingType === "GRANEL") {
+            return {
+              ...movement,
+              packagingType: newPackagingType,
+              packagingCondition: "",
+              quantity: 0,
+            };
+          }
+          return {
+            ...movement,
+            packagingType: newPackagingType,
+          };
+        }
+
         return {
           ...movement,
           [field]: normalizePackagingText(String(value)),
@@ -806,9 +839,16 @@ export const NaturalModule = () => {
     setSyncError(null);
 
     try {
-      const currentUserId = getFirebaseAuth().currentUser?.uid;
-
-      if (editingEntryId) {
+      if (isDemoMode) {
+        setEntries((current) =>
+          editingEntryId
+            ? current.map((entry) =>
+                entry.id === editingEntryId ? nextEntry : entry,
+              )
+            : [nextEntry, ...current],
+        );
+      } else if (editingEntryId) {
+        const currentUserId = getFirebaseAuth().currentUser?.uid;
         await saveRecord<NaturalEntry>(
           "downloads",
           editingEntryId,
@@ -816,6 +856,7 @@ export const NaturalModule = () => {
           currentUserId,
         );
       } else {
+        const currentUserId = getFirebaseAuth().currentUser?.uid;
         await createRecord<NaturalEntry>(
           "downloads",
           nextEntry.id,
@@ -850,7 +891,14 @@ export const NaturalModule = () => {
     setSyncError(null);
 
     try {
-      await deleteRecord("downloads", entryId);
+      if (isDemoMode) {
+        setEntries((current) =>
+          current.filter((entry) => entry.id !== entryId),
+        );
+        setExpandedEntryId((current) => (current === entryId ? null : current));
+      } else {
+        await deleteRecord("downloads", entryId);
+      }
     } catch {
       setSyncError("No se pudo eliminar la descarga en Firestore.");
     } finally {
@@ -1051,9 +1099,14 @@ export const NaturalModule = () => {
                       {entry.client || "SIN CLIENTE"} /{" "}
                       {entry.supplier || "SIN PROVEEDOR"}
                     </p>
-                    <p className="record-card__summary">
-                      {formatKg(entry.netKg)} / {formatDate(entry.entryDate)}
-                    </p>
+                    <div className="natural-record__netkg">
+                      <span className="natural-record__netkg-value">
+                        {formatKg(entry.netKg)}
+                      </span>
+                      <span className="natural-record__netkg-date">
+                        {formatDate(entry.entryDate)}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="natural-record__actions">
@@ -1131,9 +1184,9 @@ export const NaturalModule = () => {
                           <div key={movement.id}>
                             <span>Envases</span>
                             <strong>
-                              {movement.quantity}{" "}
-                              {movement.packagingType.toLowerCase()}{" "}
-                              {movement.packagingCondition.toLowerCase()}
+                              {movement.packagingType === "GRANEL"
+                                ? movement.packagingType.toLowerCase()
+                                : `${movement.quantity} ${movement.packagingType.toLowerCase()} ${movement.packagingCondition.toLowerCase()}`}
                             </strong>
                           </div>
                         ))
@@ -1516,41 +1569,47 @@ export const NaturalModule = () => {
                             </select>
                           </label>
 
-                          <label>
-                            Estado
-                            <select
-                              value={movement.packagingCondition}
-                              onChange={(event) =>
-                                handlePackagingMovementChange(
-                                  movement.id,
-                                  "packagingCondition",
-                                  event.target.value,
-                                )
-                              }
-                            >
-                              {packagingConditionOptions.map((condition) => (
-                                <option key={condition} value={condition}>
-                                  {condition}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                          {movement.packagingType !== "GRANEL" && (
+                            <>
+                              <label>
+                                Estado
+                                <select
+                                  value={movement.packagingCondition}
+                                  onChange={(event) =>
+                                    handlePackagingMovementChange(
+                                      movement.id,
+                                      "packagingCondition",
+                                      event.target.value,
+                                    )
+                                  }
+                                >
+                                  {packagingConditionOptions.map(
+                                    (condition) => (
+                                      <option key={condition} value={condition}>
+                                        {condition}
+                                      </option>
+                                    ),
+                                  )}
+                                </select>
+                              </label>
 
-                          <label>
-                            Cantidad
-                            <input
-                              type="number"
-                              min="0"
-                              value={movement.quantity}
-                              onChange={(event) =>
-                                handlePackagingMovementChange(
-                                  movement.id,
-                                  "quantity",
-                                  Number(event.target.value),
-                                )
-                              }
-                            />
-                          </label>
+                              <label>
+                                Cantidad
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={movement.quantity}
+                                  onChange={(event) =>
+                                    handlePackagingMovementChange(
+                                      movement.id,
+                                      "quantity",
+                                      Number(event.target.value),
+                                    )
+                                  }
+                                />
+                              </label>
+                            </>
+                          )}
 
                           <button
                             type="button"

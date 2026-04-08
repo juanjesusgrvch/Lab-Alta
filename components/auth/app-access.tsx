@@ -13,9 +13,14 @@ import {
   observeAuthState,
   requestPasswordReset,
   signInWithEmail,
+  signInWithGoogle,
+  signInWithServerToken,
   signOutSession,
 } from "@/lib/firebase-auth";
 import { syncSignedInUser } from "@/lib/firestore-records";
+
+const createAppError = (code: string) =>
+  Object.assign(new Error(code), { code });
 
 const getAuthErrorMessage = (error: unknown) => {
   const errorCode =
@@ -37,13 +42,80 @@ const getAuthErrorMessage = (error: unknown) => {
       return "Falta la clave para iniciar sesion.";
     case "auth/network-request-failed":
       return "No se pudo contactar a Firebase. Revisa la conexion y la configuracion del proyecto.";
+    case "auth/popup-closed-by-user":
+      return "Se cerro la ventana de Google antes de completar el ingreso.";
+    case "auth/popup-blocked":
+      return "El navegador bloqueo la ventana de Google. Habilita popups e intenta otra vez.";
+    case "auth/cancelled-popup-request":
+      return "Ya habia una solicitud de acceso con Google en curso.";
+    case "auth/operation-not-allowed":
+      return "El proveedor solicitado no esta habilitado en Firebase Authentication.";
+    case "auth/unauthorized-domain":
+      return "Este dominio todavia no esta autorizado para Google OAuth en Firebase.";
+    case "auth/user-disabled":
+      return "La cuenta esta deshabilitada en Firebase Authentication.";
+    case "turnstile/missing-token":
+    case "turnstile/verification-failed":
+      return "Completa correctamente la verificacion de Cloudflare Turnstile antes de continuar.";
+    case "turnstile/misconfigured":
+      return "Turnstile no esta configurado correctamente en el servidor.";
+    case "turnstile/service-unavailable":
+      return "No se pudo validar Turnstile en este momento. Intenta nuevamente en unos segundos.";
+    case "server-auth/rate-limited":
+      return "Se bloquearon temporalmente los intentos de acceso por exceso de intentos. Espera y vuelve a probar.";
+    case "server-auth/misconfigured":
+      return "El backend de autenticacion segura no esta configurado correctamente. En local faltan credenciales de Firebase Admin para emitir el custom token.";
+    case "server-auth/service-unavailable":
+      return "El backend de autenticacion no pudo contactar a Firebase. Intenta nuevamente.";
+    case "server-auth/login-failed":
+      return "No se pudo completar el login seguro contra Firebase.";
     default:
       return "No se pudo completar la operacion con Firebase.";
   }
 };
 
+const requestSecureEmailLogin = async (
+  email: string,
+  password: string,
+  turnstileToken: string,
+) => {
+  const response = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      email,
+      password,
+      turnstileToken,
+    }),
+  }).catch(() => null);
+
+  if (!response) {
+    throw createAppError("server-auth/service-unavailable");
+  }
+
+  const payload = (await response.json().catch(() => null)) as {
+    success?: boolean;
+    error?: string;
+    customToken?: string;
+    fallbackMode?: string;
+  } | null;
+
+  if (!response.ok || !payload?.success) {
+    throw createAppError(payload?.error ?? "server-auth/login-failed");
+  }
+
+  return {
+    customToken: payload.customToken ?? null,
+    fallbackMode: payload.fallbackMode ?? null,
+  };
+};
+
 export const AppAccess = () => {
-  const [sessionUser, setSessionUser] = useState<User | null | undefined>(undefined);
+  const [sessionUser, setSessionUser] = useState<User | null | undefined>(
+    undefined,
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -79,13 +151,46 @@ export const AppAccess = () => {
     return unsubscribe;
   }, []);
 
-  const handleEmailAccess = async (email: string, password: string) => {
+  const handleEmailAccess = async (
+    email: string,
+    password: string,
+    turnstileToken: string,
+  ) => {
     setIsSubmitting(true);
     setErrorMessage(null);
     setInfoMessage(null);
 
     try {
-      await signInWithEmail(email, password);
+      const loginResult = await requestSecureEmailLogin(
+        email,
+        password,
+        turnstileToken,
+      );
+
+      if (loginResult.customToken) {
+        await signInWithServerToken(loginResult.customToken);
+        return;
+      }
+
+      if (loginResult.fallbackMode === "client-password") {
+        await signInWithEmail(email, password);
+        return;
+      }
+
+      throw createAppError("server-auth/login-failed");
+    } catch (error) {
+      setErrorMessage(getAuthErrorMessage(error));
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleGoogleAccess = async () => {
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    setInfoMessage(null);
+
+    try {
+      await signInWithGoogle();
     } catch (error) {
       setErrorMessage(getAuthErrorMessage(error));
       setIsSubmitting(false);
@@ -94,7 +199,9 @@ export const AppAccess = () => {
 
   const handlePasswordReset = async (email: string) => {
     if (!email.trim()) {
-      setErrorMessage("Ingresa el correo para enviar la recuperacion de acceso.");
+      setErrorMessage(
+        "Ingresa el correo para enviar la recuperacion de acceso.",
+      );
       return;
     }
 
@@ -104,7 +211,9 @@ export const AppAccess = () => {
 
     try {
       await requestPasswordReset(email);
-      setInfoMessage("Si el correo existe, Firebase enviara un enlace para restablecer la clave.");
+      setInfoMessage(
+        "Si el correo existe, Firebase enviara un enlace para restablecer la clave.",
+      );
     } catch (error) {
       setErrorMessage(getAuthErrorMessage(error));
     } finally {
@@ -128,8 +237,8 @@ export const AppAccess = () => {
       <main className="auth-loading-screen">
         <section className="auth-loading-card card">
           <LoaderCircle className="auth-loading-icon" size={28} />
-          <strong>Conectando acceso Firebase</strong>
-          <p>Validando sesion y preparando el tablero operativo.</p>
+          <strong>Solicitando Acceso</strong>
+          <p>Validando sesion y preparando el Dashboard.</p>
         </section>
       </main>
     );
@@ -141,6 +250,7 @@ export const AppAccess = () => {
         isSubmitting={isSubmitting}
         errorMessage={errorMessage}
         infoMessage={infoMessage}
+        onGoogleAccess={handleGoogleAccess}
         onEmailAccess={handleEmailAccess}
         onPasswordReset={handlePasswordReset}
       />
@@ -148,6 +258,19 @@ export const AppAccess = () => {
   }
 
   const accessLevel = getUserAccessLevel(sessionUser);
+
+  if (accessLevel === "demo") {
+    return (
+      <DashboardApp
+        key={`demo-${sessionUser.uid}`}
+        sessionName={sessionUser.displayName}
+        sessionEmail={sessionUser.email}
+        sessionWarning="Estás usando el dashboard en modo 'demo'. Puedes crear, editar, eliminar y exportar registros de ejemplo, pero nada se guarda y todos los cambios se pierden al recargar."
+        dataMode="demo"
+        onSignOut={handleSignOut}
+      />
+    );
+  }
 
   if (accessLevel === "none") {
     return (
@@ -162,9 +285,11 @@ export const AppAccess = () => {
 
   return (
     <DashboardApp
+      key={`full-${sessionUser.uid}`}
       sessionName={sessionUser.displayName}
       sessionEmail={sessionUser.email}
       sessionWarning={sessionWarning}
+      dataMode="live"
       onSignOut={handleSignOut}
     />
   );

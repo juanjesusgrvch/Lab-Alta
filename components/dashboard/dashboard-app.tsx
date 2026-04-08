@@ -12,6 +12,7 @@ import {
 } from "@/components/dashboard/dashboard-header";
 import { NaturalModule } from "@/components/modules/natural-module";
 import { SamplesModule } from "@/components/modules/samples-module";
+import type { DashboardDataMode } from "@/lib/dashboard-data-mode";
 import { classNames } from "@/lib/format";
 import { getFirebaseAnalytics } from "@/lib/firebase";
 import type { DashboardTab } from "@/types/domain";
@@ -40,12 +41,15 @@ interface DashboardAppProps {
   sessionName?: string | null;
   sessionEmail?: string | null;
   sessionWarning?: string | null;
+  dataMode?: DashboardDataMode;
   onSignOut: () => void;
 }
 
 export const DashboardApp = ({
   sessionName,
   sessionEmail,
+  sessionWarning,
+  dataMode = "live",
   onSignOut,
 }: DashboardAppProps) => {
   const [activeTab, setActiveTab] = useState<DashboardTab>("defects");
@@ -116,7 +120,12 @@ export const DashboardApp = ({
         return;
       }
 
-      gsap.killTweensOf([currentPanel, nextPanel, ...currentTargets, ...nextTargets]);
+      gsap.killTweensOf([
+        currentPanel,
+        nextPanel,
+        ...currentTargets,
+        ...nextTargets,
+      ]);
 
       gsap.set(currentPanel, {
         autoAlpha: 1,
@@ -200,9 +209,10 @@ export const DashboardApp = ({
     setActiveTab(nextTab);
   };
 
-  const setPanelRef = (tabId: DashboardTab) => (node: HTMLDivElement | null) => {
-    panelsRef.current[tabId] = node;
-  };
+  const setPanelRef =
+    (tabId: DashboardTab) => (node: HTMLDivElement | null) => {
+      panelsRef.current[tabId] = node;
+    };
 
   const handleThemeToggle = () => {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
@@ -234,6 +244,22 @@ export const DashboardApp = ({
       />
 
       <section className="workspace">
+        {sessionWarning ? (
+          <section className="card session-bridge">
+            <div className="session-bridge__copy">
+              <span className="eyebrow">
+                {dataMode === "demo" ? "Modo Demo" : "Estado de sesion"}
+              </span>
+              <h2>
+                {dataMode === "demo"
+                  ? "Dashboard Demo | Datos temporales"
+                  : "Atencion sobre la sesion actual"}
+              </h2>
+              <p>{sessionWarning}</p>
+            </div>
+          </section>
+        ) : null}
+
         <div
           ref={panelsStageRef}
           className="tab-panels-stage"
@@ -248,7 +274,7 @@ export const DashboardApp = ({
             )}
             aria-hidden={activeTab !== "defects"}
           >
-            <DefectsModule />
+            <DefectsModule dataMode={dataMode} />
           </div>
 
           <div
@@ -260,7 +286,7 @@ export const DashboardApp = ({
             )}
             aria-hidden={activeTab !== "natural"}
           >
-            <NaturalModule />
+            <NaturalModule dataMode={dataMode} />
           </div>
 
           <div
@@ -272,7 +298,7 @@ export const DashboardApp = ({
             )}
             aria-hidden={activeTab !== "samples"}
           >
-            <SamplesModule />
+            <SamplesModule dataMode={dataMode} />
           </div>
         </div>
       </section>

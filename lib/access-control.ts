@@ -22,11 +22,18 @@ export const allowedOperatorAccounts: readonly AllowedOperatorAccount[] = [
 const normalizeEmail = (value: string | null | undefined) =>
   value?.trim().toLowerCase() ?? "";
 
+export const isGoogleUser = (user: User | null | undefined) =>
+  user?.providerData.some((provider) => provider.providerId === "google.com") ?? false;
+
 export const getUserAccessLevel = (
   user: User | null | undefined,
 ): AccessLevel => {
   if (!user) {
     return "none";
+  }
+
+  if (isGoogleUser(user)) {
+    return "demo";
   }
 
   const normalizedEmail = normalizeEmail(user.email);

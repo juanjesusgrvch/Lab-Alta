@@ -16,6 +16,7 @@ import {
   YAxis,
 } from "recharts";
 import {
+  BadgeCheck,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -30,6 +31,7 @@ import {
 import { MetricCard, SectionCard } from "@/components/dashboard/primitives";
 import {
   formatDate,
+  formatHundredths,
   formatInteger,
   formatKg,
   getTodayInBuenosAires,
@@ -49,6 +51,8 @@ import {
   getRelationalOptions,
   type RelationalFieldConfig,
 } from "@/lib/relational-filters";
+import type { DashboardDataMode } from "@/lib/dashboard-data-mode";
+import { createDemoSamples } from "@/lib/demo-data";
 import type { StoredSample } from "@/types/domain";
 
 const chartColors = [
@@ -75,6 +79,26 @@ const addDaysToDateString = (value: string, days: number) => {
     timeZone: "America/Buenos_Aires",
   }).format(date);
 };
+
+const getReleaseCleanupDate = (today: string) => addDaysToDateString(today, -30);
+
+const isReleasedSampleExpired = (
+  sample: Pick<StoredSample, "status" | "releasedAt">,
+  today = getTodayInBuenosAires(),
+) => {
+  const releasedAt = sample.releasedAt ?? "";
+
+  if (sample.status !== "Liberada" || !isCompleteDateInput(releasedAt)) {
+    return false;
+  }
+
+  const cleanupLimit = getReleaseCleanupDate(today);
+
+  return Boolean(cleanupLimit) && releasedAt <= cleanupLimit;
+};
+
+const isStoredSampleReleased = (sample: Pick<StoredSample, "status">) =>
+  sample.status === "Liberada";
 
 const getSampleStatus = (
   sample: Pick<StoredSample, "status" | "retentionUntil">,
@@ -104,9 +128,11 @@ const createEmptyForm = (): Omit<StoredSample, "id"> => {
     relatedAnalysisId: "",
     warehouseZone: "Pendiente",
     shelf: "Sin asignar",
+    gramajeHundredths: null,
     quantityKg: 0,
     retentionUntil: addDaysToDateString(today, 90),
     status: "Activa",
+    releasedAt: undefined,
     notes: "",
   };
 };
@@ -121,9 +147,11 @@ const formFromSample = (sample: StoredSample): Omit<StoredSample, "id"> => ({
   relatedAnalysisId: sample.relatedAnalysisId,
   warehouseZone: sample.warehouseZone,
   shelf: sample.shelf,
+  gramajeHundredths: sample.gramajeHundredths,
   quantityKg: sample.quantityKg,
   retentionUntil: sample.retentionUntil,
   status: sample.status,
+  releasedAt: sample.releasedAt,
   notes: sample.notes,
 });
 
@@ -144,10 +172,18 @@ const normalizeStoredSample = (
   relatedAnalysisId: sample.relatedAnalysisId ?? "",
   warehouseZone: sample.warehouseZone ?? "Pendiente",
   shelf: sample.shelf ?? "Sin asignar",
+  gramajeHundredths:
+    Number(sample.gramajeHundredths ?? 0) > 0
+      ? Math.round(Number(sample.gramajeHundredths ?? 0))
+      : null,
   quantityKg: Number(sample.quantityKg ?? 0),
   retentionUntil:
     sample.retentionUntil ?? addDaysToDateString(getTodayInBuenosAires(), 90),
   status: sample.status ?? "Activa",
+  releasedAt:
+    typeof sample.releasedAt === "string" && isCompleteDateInput(sample.releasedAt)
+      ? sample.releasedAt
+      : undefined,
   notes: sample.notes ?? "",
 });
 
@@ -216,8 +252,17 @@ const sampleFormRelationConfig: Record<
   },
 };
 
-export const SamplesModule = () => {
-  const [samples, setSamples] = useState<StoredSample[]>([]);
+interface SamplesModuleProps {
+  dataMode?: DashboardDataMode;
+}
+
+export const SamplesModule = ({
+  dataMode = "live",
+}: SamplesModuleProps) => {
+  const isDemoMode = dataMode === "demo";
+  const [samples, setSamples] = useState<StoredSample[]>(() =>
+    isDemoMode ? createDemoSamples() : [],
+  );
   const [filters, setFilters] = useState({
     client: "",
     supplier: "",
@@ -232,17 +277,26 @@ export const SamplesModule = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [isRetentionPreset, setIsRetentionPreset] = useState(true);
   const [hasMounted, setHasMounted] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(!isDemoMode);
   const [isPersisting, setIsPersisting] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [expandedSampleId, setExpandedSampleId] = useState<string | null>(null);
+  const [sampleToRelease, setSampleToRelease] = useState<StoredSample | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const deletingReleasedIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setHasMounted(true);
   }, []);
 
   useEffect(() => {
+    if (isDemoMode) {
+      setSamples(createDemoSamples());
+      setIsSyncing(false);
+      setSyncError(null);
+      return;
+    }
+
     const unsubscribe = subscribeToRecords<StoredSample>(
       "samples",
       (records) => {
@@ -264,10 +318,10 @@ export const SamplesModule = () => {
     );
 
     return unsubscribe;
-  }, []);
+  }, [isDemoMode]);
 
   useEffect(() => {
-    if (!isModalOpen) {
+    if (!isModalOpen && !sampleToRelease) {
       return;
     }
 
@@ -276,6 +330,11 @@ export const SamplesModule = () => {
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (sampleToRelease) {
+          setSampleToRelease(null);
+          return;
+        }
+
         setIsModalOpen(false);
       }
     };
@@ -286,7 +345,7 @@ export const SamplesModule = () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isModalOpen]);
+  }, [isModalOpen, sampleToRelease]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -510,6 +569,9 @@ export const SamplesModule = () => {
     Math.ceil(sortedFilteredSamples.length / PAGE_SIZE),
   );
   const safeCurrentPage = Math.min(currentPage, totalPages);
+  const isReleaseReactivating = sampleToRelease
+    ? isStoredSampleReleased(sampleToRelease)
+    : false;
   const paginatedSamples = sortedFilteredSamples.slice(
     (safeCurrentPage - 1) * PAGE_SIZE,
     safeCurrentPage * PAGE_SIZE,
@@ -520,6 +582,60 @@ export const SamplesModule = () => {
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    const availableIds = new Set(samples.map((sample) => sample.id));
+
+    deletingReleasedIdsRef.current.forEach((sampleId) => {
+      if (!availableIds.has(sampleId)) {
+        deletingReleasedIdsRef.current.delete(sampleId);
+      }
+    });
+
+    setSampleToRelease((current) =>
+      current && availableIds.has(current.id) ? current : null,
+    );
+  }, [samples]);
+
+  useEffect(() => {
+    const expiredReleasedSamples = samples.filter((sample) =>
+      isReleasedSampleExpired(sample, today),
+    );
+
+    if (!expiredReleasedSamples.length) {
+      return;
+    }
+
+    const expiredIds = expiredReleasedSamples.map((sample) => sample.id);
+
+    if (isDemoMode) {
+      setSamples((current) =>
+        current.filter((sample) => !expiredIds.includes(sample.id)),
+      );
+      setExpandedSampleId((current) =>
+        current && expiredIds.includes(current) ? null : current,
+      );
+      setSampleToRelease((current) =>
+        current && expiredIds.includes(current.id) ? null : current,
+      );
+      return;
+    }
+
+    expiredReleasedSamples.forEach((sample) => {
+      if (deletingReleasedIdsRef.current.has(sample.id)) {
+        return;
+      }
+
+      deletingReleasedIdsRef.current.add(sample.id);
+
+      void deleteRecord("samples", sample.id).catch(() => {
+        deletingReleasedIdsRef.current.delete(sample.id);
+        setSyncError(
+          "No se pudieron eliminar algunas muestras liberadas vencidas en Firestore.",
+        );
+      });
+    });
+  }, [isDemoMode, samples, today]);
 
   const openCreateModal = () => {
     setEditingSampleId(null);
@@ -538,6 +654,10 @@ export const SamplesModule = () => {
   const closeCreateModal = () => {
     setIsModalOpen(false);
     setEditingSampleId(null);
+  };
+
+  const closeReleaseModal = () => {
+    setSampleToRelease(null);
   };
 
   const toggleExpandedSample = (sampleId: string) => {
@@ -560,11 +680,12 @@ export const SamplesModule = () => {
 
   const handleFormChange = (
     field: keyof Omit<StoredSample, "id">,
-    value: string | number,
+    value: string | number | null,
   ) => {
     setForm((current) => {
       const nextValue =
-        field === "quantityKg" && typeof value === "number"
+        (field === "quantityKg" || field === "gramajeHundredths") &&
+        typeof value === "number"
           ? Math.max(value, 0)
           : value;
 
@@ -651,6 +772,23 @@ export const SamplesModule = () => {
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
+    const existingSample = editingSampleId
+      ? samples.find((sample) => sample.id === editingSampleId)
+      : null;
+    const normalizedGramaje =
+      typeof form.gramajeHundredths === "number" && form.gramajeHundredths > 0
+        ? Math.round(form.gramajeHundredths)
+        : null;
+    const preservedStatus = existingSample?.status ?? (editingSampleId ? form.status : "Activa");
+    const preservedReleasedAt =
+      preservedStatus === "Liberada"
+        ? existingSample?.releasedAt && isCompleteDateInput(existingSample.releasedAt)
+          ? existingSample.releasedAt
+          : isCompleteDateInput(form.releasedAt ?? "")
+            ? form.releasedAt
+            : getTodayInBuenosAires()
+        : undefined;
+
     const nextSample: StoredSample = {
       ...form,
       id: editingSampleId ?? `SMP-${Date.now()}`,
@@ -663,14 +801,24 @@ export const SamplesModule = () => {
       notes: form.notes.trim(),
       warehouseZone: "Pendiente",
       shelf: "Sin asignar",
-      status: "Activa",
+      gramajeHundredths: normalizedGramaje,
+      status: preservedStatus,
+      releasedAt: preservedReleasedAt,
     };
 
     setIsPersisting(true);
     setSyncError(null);
 
     try {
-      if (editingSampleId) {
+      if (isDemoMode) {
+        setSamples((current) =>
+          editingSampleId
+            ? current.map((sample) =>
+                sample.id === editingSampleId ? nextSample : sample,
+              )
+            : [nextSample, ...current],
+        );
+      } else if (editingSampleId) {
         await saveRecord<StoredSample>(
           "samples",
           editingSampleId,
@@ -725,6 +873,14 @@ export const SamplesModule = () => {
     setIsPersisting(true);
     setSyncError(null);
 
+    if (isDemoMode) {
+      setSamples((current) => current.filter((sample) => sample.id !== sampleId));
+      setExpandedSampleId((current) => (current === sampleId ? null : current));
+      setSampleToRelease((current) => (current?.id === sampleId ? null : current));
+      setIsPersisting(false);
+      return;
+    }
+
     void deleteRecord("samples", sampleId)
       .catch(() => {
         setSyncError("No se pudo eliminar la muestra en Firestore.");
@@ -732,6 +888,58 @@ export const SamplesModule = () => {
       .finally(() => {
         setIsPersisting(false);
       });
+  };
+
+  const handleReleaseSample = async () => {
+    if (!sampleToRelease) {
+      return;
+    }
+
+    const previousSample = sampleToRelease;
+    const isReactivating = isStoredSampleReleased(previousSample);
+    const releasedAt = isReactivating ? null : getTodayInBuenosAires();
+    const releasedSample: StoredSample = {
+      ...previousSample,
+      status: isReactivating ? "Activa" : "Liberada",
+      releasedAt,
+    };
+
+    setIsPersisting(true);
+    setSyncError(null);
+    setSamples((current) =>
+      current.map((sample) =>
+        sample.id === previousSample.id ? releasedSample : sample,
+      ),
+    );
+
+    try {
+      if (!isDemoMode) {
+        await saveRecord<StoredSample>(
+          "samples",
+          previousSample.id,
+          {
+            status: isReactivating ? "Activa" : "Liberada",
+            releasedAt,
+          },
+          getFirebaseAuth().currentUser?.uid,
+        );
+      }
+
+      setSampleToRelease(null);
+    } catch {
+      setSamples((current) =>
+        current.map((sample) =>
+          sample.id === previousSample.id ? previousSample : sample,
+        ),
+      );
+      setSyncError(
+        isReactivating
+          ? "No se pudo devolver la muestra al estado activa en Firestore."
+          : "No se pudo liberar la muestra en Firestore.",
+      );
+    } finally {
+      setIsPersisting(false);
+    }
   };
 
   return (
@@ -923,7 +1131,10 @@ export const SamplesModule = () => {
                     <p className="record-card__summary">{sampleStatus}</p>
                   </div>
 
-                  <div className="natural-record__actions">
+                  <div
+                    className="natural-record__actions"
+                    onClick={(event) => event.stopPropagation()}
+                  >
                     <button
                       type="button"
                       className="icon-button compact-icon-button compact-icon-button--view"
@@ -959,6 +1170,26 @@ export const SamplesModule = () => {
                       title="Editar"
                     >
                       <Pencil size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button compact-icon-button compact-icon-button--release"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSampleToRelease(sample);
+                      }}
+                      aria-label={
+                        sampleStatus === "Liberada"
+                          ? "Volver la muestra al estado activa"
+                          : "Liberar muestra"
+                      }
+                      title={
+                        sampleStatus === "Liberada"
+                          ? "Volver a activa"
+                          : "Liberar muestra"
+                      }
+                    >
+                      <BadgeCheck size={15} />
                     </button>
                     <button
                       type="button"
@@ -999,6 +1230,15 @@ export const SamplesModule = () => {
                         <strong>{formatDate(sample.retentionUntil)}</strong>
                       </div>
                       <div>
+                        <span>Gramaje</span>
+                        <strong>
+                          {sample.gramajeHundredths != null &&
+                          sample.gramajeHundredths > 0
+                            ? formatHundredths(sample.gramajeHundredths)
+                            : "Sin dato"}
+                        </strong>
+                      </div>
+                      <div>
                         <span>Analisis relacionado</span>
                         <strong>
                           {sample.relatedAnalysisId || "Sin vinculo"}
@@ -1012,6 +1252,16 @@ export const SamplesModule = () => {
                             : "No aplica"}
                         </strong>
                       </div>
+                      {sample.status === "Liberada" ? (
+                        <div>
+                          <span>Fecha de liberacion</span>
+                          <strong>
+                            {sample.releasedAt
+                              ? formatDate(sample.releasedAt)
+                              : "Sin fecha"}
+                          </strong>
+                        </div>
+                      ) : null}
                     </div>
 
                     {sample.notes ? (
@@ -1269,6 +1519,22 @@ export const SamplesModule = () => {
                         />
                       </label>
                       <label>
+                        Gramaje
+                        <input
+                          type="number"
+                          min="0"
+                          value={form.gramajeHundredths ?? ""}
+                          onChange={(event) =>
+                            handleFormChange(
+                              "gramajeHundredths",
+                              event.target.value === ""
+                                ? null
+                                : Number(event.target.value),
+                            )
+                          }
+                        />
+                      </label>
+                      <label>
                         Cantidad kg de lote
                         <input
                           type="number"
@@ -1368,6 +1634,95 @@ export const SamplesModule = () => {
                         <option key={analysisId} value={analysisId} />
                       ))}
                 </datalist>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {sampleToRelease && hasMounted
+        ? createPortal(
+            <div
+              className="samples-modal-backdrop"
+              role="presentation"
+              onClick={closeReleaseModal}
+            >
+              <div
+                className="samples-modal card"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="samples-release-modal-title"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="samples-modal__header">
+                  <div>
+                    <span className="eyebrow">
+                      {isReleaseReactivating
+                        ? "Reactivar muestra"
+                        : "Liberar muestra"}
+                    </span>
+                    <h3 id="samples-release-modal-title">
+                      {isReleaseReactivating
+                        ? "Confirmar reactivacion"
+                        : "Confirmar liberacion"}
+                    </h3>
+                    <p>
+                      {isReleaseReactivating ? (
+                        <>
+                          La muestra{" "}
+                          <strong>
+                            {sampleToRelease.sampleCode || sampleToRelease.id}
+                          </strong>{" "}
+                          volvera al estado activa y dejara de tener fecha de
+                          liberacion.
+                        </>
+                      ) : (
+                        <>
+                          La muestra{" "}
+                          <strong>
+                            {sampleToRelease.sampleCode || sampleToRelease.id}
+                          </strong>{" "}
+                          pasara a estado liberada y se eliminara
+                          automaticamente despues de 30 dias.
+                        </>
+                      )}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="icon-button"
+                    onClick={closeReleaseModal}
+                    aria-label="Cerrar modal"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="samples-modal__actions">
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={closeReleaseModal}
+                    disabled={isPersisting}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => void handleReleaseSample()}
+                    disabled={isPersisting}
+                  >
+                    {isPersisting
+                      ? isReleaseReactivating
+                        ? "Reactivando..."
+                        : "Liberando..."
+                      : isReleaseReactivating
+                        ? "Si, volver a activa"
+                        : "Si, liberar muestra"}
+                  </button>
+                </div>
               </div>
             </div>,
             document.body,

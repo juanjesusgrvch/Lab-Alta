@@ -2,36 +2,50 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
+    function isAuthenticated() {
       return request.auth != null;
     }
 
-    function authorizedOperator() {
-      return signedIn() && (
-        request.auth.uid == "YmFkf4hqIaQsBWm1waccoIdxB7K2" ||
-        request.auth.uid == "RTgzHx5HHiNYVlPxVGIxkXMYsK83"
-      );
+    function isNotGoogleUser() {
+      return isAuthenticated() &&
+        request.auth.token.firebase.sign_in_provider != "google.com";
     }
 
-    function sameUser(userId) {
-      return signedIn() && request.auth.uid == userId;
+    function isAssignedOperator() {
+      return isNotGoogleUser() &&
+        request.auth.uid in [
+          "YmFkf4hqIaQsBWm1waccoIdxB7K2",
+          "RTgzHx5HHiNYVlPxVGIxkXMYsK83",
+        ];
+    }
+
+    function isSameUser(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function canAccessSensitiveData() {
+      return isAssignedOperator();
     }
 
     match /usuarios/{userId} {
-      allow read, create, update: if authorizedOperator() && sameUser(userId);
+      allow read, create, update: if isAssignedOperator() && isSameUser(userId);
       allow delete: if false;
     }
 
-    match /defectos/{documentId} {
-      allow read, write: if authorizedOperator();
+    match /usuarios/{userId}/{document=**} {
+      allow read, write: if false;
     }
 
-    match /descargas/{documentId} {
-      allow read, write: if authorizedOperator();
+    match /defectos/{document=**} {
+      allow read, write: if canAccessSensitiveData();
     }
 
-    match /muestras/{documentId} {
-      allow read, write: if authorizedOperator();
+    match /descargas/{document=**} {
+      allow read, write: if canAccessSensitiveData();
+    }
+
+    match /muestras/{document=**} {
+      allow read, write: if canAccessSensitiveData();
     }
 
     match /{document=**} {

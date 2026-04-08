@@ -36,6 +36,22 @@ Copiar `.env.local.example` a `.env.local` y completar:
 - `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
 - `NEXT_PUBLIC_FIREBASE_APP_ID`
 - `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID`
+- `NEXT_PUBLIC_TURNSTILE_SITE_KEY`
+- `TURNSTILE_SECRET_KEY`
+
+Para el login seguro por backend con `custom token`, completar ademas una de estas opciones:
+
+- Variables de service account:
+  - `FIREBASE_ADMIN_PROJECT_ID`
+  - `FIREBASE_ADMIN_CLIENT_EMAIL`
+  - `FIREBASE_ADMIN_PRIVATE_KEY`
+- O credenciales ADC disponibles en el entorno donde corre Next.js / App Hosting.
+
+Rate limit opcional del login:
+
+- `AUTH_LOGIN_RATE_LIMIT_WINDOW_MS`
+- `AUTH_LOGIN_RATE_LIMIT_LOCKOUT_MS`
+- `AUTH_LOGIN_RATE_LIMIT_MAX_FAILURES`
 
 La inicializacion vive en `lib/firebase.ts`.
 
@@ -54,6 +70,7 @@ La capa base de Firestore vive en `lib/firestore-records.ts`.
 
 - Solo el operador inicial autorizado puede leer y escribir en `defectos`, `descargas` y `muestras`.
 - Solo el operador autorizado puede crear o actualizar su propio documento en `usuarios/{uid}`.
+- Las sesiones `google.com` entran en modo UI-only y no pueden leer ni escribir en Firestore.
 - Una cuenta autenticada pero fuera de la allowlist no entra al dashboard real y no toca Firestore.
 
 ### Usuario inicial autorizado
