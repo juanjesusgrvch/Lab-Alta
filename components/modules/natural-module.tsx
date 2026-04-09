@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import {
   Bar,
   BarChart,
@@ -29,6 +29,12 @@ import {
 
 import { MetricCard, SectionCard } from "@/components/dashboard/primitives";
 import {
+  PdfExportPortal,
+  PdfExportRoot,
+  PdfSelectedFiltersSection,
+  type PdfExportFilterItem,
+} from "@/components/modules/pdf-export";
+import {
   formatDate,
   formatInteger,
   formatKg,
@@ -41,7 +47,7 @@ import {
   saveRecord,
   subscribeToRecords,
 } from "@/lib/firestore-records";
-import { exportElementToPdf } from "@/lib/pdf";
+import { exportElementToPdf, waitForPdfLayout } from "@/lib/pdf";
 import {
   createPackagingMovement,
   formatPackagingSummary,
@@ -190,25 +196,60 @@ const formFromEntry = (entry: NaturalEntry): NaturalFormState => ({
 
 const getMonthKey = (value: string) => value.slice(0, 7);
 
-const shiftMonthKey = (monthKey: string, delta: number) => {
-  const date = new Date(`${monthKey}-01T12:00:00`);
-  date.setMonth(date.getMonth() + delta);
+const parseMonthKey = (monthKey: string) => {
+  const match = /^(\d{4})-(\d{2})$/.exec(monthKey);
 
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-  }).format(date);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+
+  if (!Number.isInteger(year) || monthIndex < 0 || monthIndex > 11) {
+    return null;
+  }
+
+  return { year, monthIndex };
 };
 
 const formatMonthLabel = (monthKey: string) => {
+  const parsed = parseMonthKey(monthKey);
+
+  if (!parsed) {
+    return "Mes no disponible";
+  }
+
   const label = new Intl.DateTimeFormat("es-AR", {
     month: "long",
     year: "numeric",
     timeZone: "America/Buenos_Aires",
-  }).format(new Date(`${monthKey}-01T12:00:00`));
+  }).format(new Date(Date.UTC(parsed.year, parsed.monthIndex, 1, 12)));
 
   return label.charAt(0).toUpperCase() + label.slice(1);
+};
+
+const getAdjacentMonthKey = (
+  monthKeys: string[],
+  currentMonthKey: string,
+  delta: number,
+) => {
+  if (!monthKeys.length) {
+    return currentMonthKey;
+  }
+
+  const currentIndex = monthKeys.indexOf(currentMonthKey);
+
+  if (currentIndex === -1) {
+    return delta < 0 ? monthKeys.at(-1) ?? currentMonthKey : monthKeys[0];
+  }
+
+  const nextIndex = Math.min(
+    Math.max(currentIndex + (delta < 0 ? -1 : 1), 0),
+    monthKeys.length - 1,
+  );
+
+  return monthKeys[nextIndex];
 };
 
 const getDayTicks = (daysInMonth: number) => {
@@ -306,10 +347,12 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     processCode: "",
     onlyWithAnalysis: false,
   });
+  const [areFiltersVisible, setAreFiltersVisible] = useState(true);
   const [form, setForm] = useState(createEmptyForm);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [isExporting, setIsExporting] = useState(false);
+  const [isPreparingPdf, setIsPreparingPdf] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [hasMounted, setHasMounted] = useState(false);
   const [activeMonthKey, setActiveMonthKey] = useState(() =>
@@ -319,7 +362,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   const [isPersisting, setIsPersisting] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setHasMounted(true);
@@ -553,6 +596,9 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
 
     return byDate || right.id.localeCompare(left.id);
   });
+  const availableMonthKeys = Array.from(
+    new Set(filteredEntries.map((entry) => getMonthKey(entry.entryDate))),
+  ).sort((left, right) => left.localeCompare(right));
 
   const totalNetKg = filteredEntries.reduce(
     (accumulator, entry) => accumulator + entry.netKg,
@@ -561,6 +607,15 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   const analyzedEntries = filteredEntries.filter(
     (entry) => entry.withAnalysis,
   ).length;
+  const selectedFilterItems: PdfExportFilterItem[] = [
+    { label: "Cliente", value: filters.client },
+    { label: "Proveedor", value: filters.supplier },
+    { label: "Proceso", value: filters.processCode },
+    { label: "Producto", value: filters.product },
+    ...(filters.onlyWithAnalysis
+      ? [{ label: "Analisis", value: "Solo con analisis" }]
+      : []),
+  ].filter((item) => item.value);
 
   const inboundByProductMap = new Map<string, number>();
   filteredEntries.forEach((entry) => {
@@ -574,7 +629,11 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     .map(([name, netKg]) => ({ name, netKg }))
     .sort((left, right) => right.netKg - left.netKg);
 
-  const activeMonthDate = new Date(`${activeMonthKey}-01T12:00:00`);
+  const activeMonth = parseMonthKey(activeMonthKey) ?? {
+    year: Number(getTodayInBuenosAires().slice(0, 4)),
+    monthIndex: Number(getTodayInBuenosAires().slice(5, 7)) - 1,
+  };
+  const activeMonthDate = new Date(activeMonth.year, activeMonth.monthIndex, 1, 12);
   const daysInActiveMonth = new Date(
     activeMonthDate.getFullYear(),
     activeMonthDate.getMonth() + 1,
@@ -601,6 +660,10 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       netKg: loads.reduce((sum, load) => sum + load, 0),
     }))
     .sort((left, right) => left.day - right.day);
+  const activeMonthIndex = availableMonthKeys.indexOf(activeMonthKey);
+  const hasPreviousMonth = activeMonthIndex > 0;
+  const hasNextMonth =
+    activeMonthIndex !== -1 && activeMonthIndex < availableMonthKeys.length - 1;
 
   const totalPages = Math.max(1, Math.ceil(sortedEntries.length / PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -907,21 +970,162 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   };
 
   const handleExport = async () => {
-    if (!panelRef.current) {
-      return;
-    }
-
     setIsExporting(true);
 
     try {
-      await exportElementToPdf(panelRef.current, "mercaderia-natural.pdf");
+      flushSync(() => {
+        setIsPreparingPdf(true);
+      });
+      await waitForPdfLayout();
+
+      if (!exportRef.current) {
+        return;
+      }
+
+      await exportElementToPdf(exportRef.current, "mercaderia-natural.pdf");
     } finally {
+      flushSync(() => {
+        setIsPreparingPdf(false);
+      });
       setIsExporting(false);
     }
   };
 
+  const renderEntryRecord = (
+    entry: NaturalEntry,
+    {
+      expanded,
+      exportMode = false,
+    }: { expanded: boolean; exportMode?: boolean },
+  ) => (
+    <article
+      key={entry.id}
+      className={`samples-record natural-record record-card--light${
+        expanded ? " is-expanded" : ""
+      }`}
+      {...(exportMode
+        ? {}
+        : {
+            role: "button" as const,
+            tabIndex: 0,
+            "aria-expanded": expanded,
+            onClick: () => toggleExpandedEntry(entry.id),
+            onKeyDown: (event: React.KeyboardEvent<HTMLElement>) =>
+              handleExpandableCardKeyDown(event, entry.id),
+          })}
+    >
+      <div className="natural-record__header">
+        <div>
+          <div className="natural-record__title-line">
+            <strong>{entry.product || "SIN PRODUCTO"}</strong>
+          </div>
+          <p>
+            {entry.client || "SIN CLIENTE"} /{" "}
+            {entry.supplier || "SIN PROVEEDOR"}
+          </p>
+          <div className="natural-record__netkg">
+            <span className="natural-record__netkg-value">
+              {formatKg(entry.netKg)}
+            </span>
+            <span className="natural-record__netkg-date">
+              {formatDate(entry.entryDate)}
+            </span>
+          </div>
+        </div>
+
+        {!exportMode ? (
+          <div className="natural-record__actions">
+            <button
+              type="button"
+              className="icon-button compact-icon-button compact-icon-button--view"
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleExpandedEntry(entry.id);
+              }}
+              aria-label={
+                expanded
+                  ? "Ocultar detalle de la descarga"
+                  : "Ver detalle de la descarga"
+              }
+              title={expanded ? "Ocultar detalle" : "Vista extendida"}
+            >
+              {expanded ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+            <button
+              type="button"
+              className="icon-button compact-icon-button compact-icon-button--edit"
+              onClick={(event) => {
+                event.stopPropagation();
+                openEditModal(entry);
+              }}
+              aria-label="Editar descarga"
+              title="Editar"
+            >
+              <Pencil size={15} />
+            </button>
+            <button
+              type="button"
+              className="icon-button compact-icon-button compact-icon-button--delete"
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleDeleteEntry(entry.id);
+              }}
+              aria-label="Eliminar descarga"
+              title="Eliminar"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {expanded ? (
+        <div className="record-card__extended">
+          <div className="record-card__extended-grid">
+            <div>
+              <span>Proceso</span>
+              <strong>{entry.processCode || "Sin proceso"}</strong>
+            </div>
+            <div>
+              <span>Codigo analisis</span>
+              <strong>
+                {entry.withAnalysis
+                  ? entry.analysisCode || "Sin codigo"
+                  : "No aplica"}
+              </strong>
+            </div>
+          </div>
+
+          <div className="record-card__extended-grid">
+            {entry.packagingMovements?.length ? (
+              entry.packagingMovements.map((movement) => (
+                <div key={movement.id}>
+                  <span>Envases</span>
+                  <strong>
+                    {movement.packagingType === "GRANEL"
+                      ? movement.packagingType.toLowerCase()
+                      : `${movement.quantity} ${movement.packagingType.toLowerCase()} ${movement.packagingCondition.toLowerCase()}`}
+                  </strong>
+                </div>
+              ))
+            ) : (
+              <div>
+                <span>Envases</span>
+                <strong>Sin envases cargados</strong>
+              </div>
+            )}
+          </div>
+
+          {entry.observations ? (
+            <p className="samples-record__notes">{entry.observations}</p>
+          ) : null}
+        </div>
+      ) : null}
+    </article>
+  );
+
   return (
-    <div ref={panelRef} className="module-stack">
+    <div className="module-stack">
       <div className="metric-grid samples-metric-grid">
         <MetricCard
           label="Registro de descargas"
@@ -954,104 +1158,116 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       <SectionCard
         title="FILTROS"
         action={
-          <button
-            type="button"
-            className="text-button"
-            onClick={() =>
-              setFilters({
-                client: "",
-                supplier: "",
-                product: "",
-                processCode: "",
-                onlyWithAnalysis: false,
-              })
-            }
-          >
-            Limpiar
-          </button>
+          <div className="section-action-cluster">
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setAreFiltersVisible((current) => !current)}
+              aria-expanded={areFiltersVisible}
+            >
+              {areFiltersVisible ? "Ocultar filtros" : "Mostrar filtros"}
+            </button>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() =>
+                setFilters({
+                  client: "",
+                  supplier: "",
+                  product: "",
+                  processCode: "",
+                  onlyWithAnalysis: false,
+                })
+              }
+            >
+              Limpiar
+            </button>
+          </div>
         }
         className="samples-filters-card"
       >
-        <div className="samples-filters-bar natural-filters-bar">
-          <label className="samples-filter-field">
-            Cliente
-            <select
-              value={filters.client}
-              onChange={(event) =>
-                handleFilterChange("client", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {clientOptions.map((client) => (
-                <option key={client} value={client}>
-                  {client}
-                </option>
-              ))}
-            </select>
-          </label>
+        {areFiltersVisible ? (
+          <div className="samples-filters-bar natural-filters-bar">
+            <label className="samples-filter-field">
+              Cliente
+              <select
+                value={filters.client}
+                onChange={(event) =>
+                  handleFilterChange("client", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {clientOptions.map((client) => (
+                  <option key={client} value={client}>
+                    {client}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Proveedor
-            <select
-              value={filters.supplier}
-              onChange={(event) =>
-                handleFilterChange("supplier", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {supplierOptions.map((supplier) => (
-                <option key={supplier} value={supplier}>
-                  {supplier}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="samples-filter-field">
+              Proveedor
+              <select
+                value={filters.supplier}
+                onChange={(event) =>
+                  handleFilterChange("supplier", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {supplierOptions.map((supplier) => (
+                  <option key={supplier} value={supplier}>
+                    {supplier}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Proceso
-            <select
-              value={filters.processCode}
-              onChange={(event) =>
-                handleFilterChange("processCode", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {processOptions.map((processCode) => (
-                <option key={processCode} value={processCode}>
-                  {processCode}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="samples-filter-field">
+              Proceso
+              <select
+                value={filters.processCode}
+                onChange={(event) =>
+                  handleFilterChange("processCode", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {processOptions.map((processCode) => (
+                  <option key={processCode} value={processCode}>
+                    {processCode}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Producto
-            <select
-              value={filters.product}
-              onChange={(event) =>
-                handleFilterChange("product", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {productOptions.map((product) => (
-                <option key={product} value={product}>
-                  {product}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="samples-filter-field">
+              Producto
+              <select
+                value={filters.product}
+                onChange={(event) =>
+                  handleFilterChange("product", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {productOptions.map((product) => (
+                  <option key={product} value={product}>
+                    {product}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="checkbox-row natural-filter-toggle">
-            <input
-              type="checkbox"
-              checked={filters.onlyWithAnalysis}
-              onChange={(event) =>
-                handleFilterChange("onlyWithAnalysis", event.target.checked)
-              }
-            />
-            <span>Solo con analisis</span>
-          </label>
-        </div>
+            <label className="checkbox-row natural-filter-toggle">
+              <input
+                type="checkbox"
+                checked={filters.onlyWithAnalysis}
+                onChange={(event) =>
+                  handleFilterChange("onlyWithAnalysis", event.target.checked)
+                }
+              />
+              <span>Solo con analisis</span>
+            </label>
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard
@@ -1076,137 +1292,11 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       >
         <div className="samples-inventory-list">
           {paginatedEntries.length ? (
-            paginatedEntries.map((entry) => (
-              <article
-                key={entry.id}
-                className={`samples-record natural-record record-card--light${
-                  expandedEntryId === entry.id ? " is-expanded" : ""
-                }`}
-                role="button"
-                tabIndex={0}
-                aria-expanded={expandedEntryId === entry.id}
-                onClick={() => toggleExpandedEntry(entry.id)}
-                onKeyDown={(event) =>
-                  handleExpandableCardKeyDown(event, entry.id)
-                }
-              >
-                <div className="natural-record__header">
-                  <div>
-                    <div className="natural-record__title-line">
-                      <strong>{entry.product || "SIN PRODUCTO"}</strong>
-                    </div>
-                    <p>
-                      {entry.client || "SIN CLIENTE"} /{" "}
-                      {entry.supplier || "SIN PROVEEDOR"}
-                    </p>
-                    <div className="natural-record__netkg">
-                      <span className="natural-record__netkg-value">
-                        {formatKg(entry.netKg)}
-                      </span>
-                      <span className="natural-record__netkg-date">
-                        {formatDate(entry.entryDate)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="natural-record__actions">
-                    <button
-                      type="button"
-                      className="icon-button compact-icon-button compact-icon-button--view"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleExpandedEntry(entry.id);
-                      }}
-                      aria-label={
-                        expandedEntryId === entry.id
-                          ? "Ocultar detalle de la descarga"
-                          : "Ver detalle de la descarga"
-                      }
-                      title={
-                        expandedEntryId === entry.id
-                          ? "Ocultar detalle"
-                          : "Vista extendida"
-                      }
-                    >
-                      {expandedEntryId === entry.id ? (
-                        <EyeOff size={15} />
-                      ) : (
-                        <Eye size={15} />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button compact-icon-button compact-icon-button--edit"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openEditModal(entry);
-                      }}
-                      aria-label="Editar descarga"
-                      title="Editar"
-                    >
-                      <Pencil size={15} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button compact-icon-button compact-icon-button--delete"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleDeleteEntry(entry.id);
-                      }}
-                      aria-label="Eliminar descarga"
-                      title="Eliminar"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
-
-                {expandedEntryId === entry.id ? (
-                  <div className="record-card__extended">
-                    <div className="record-card__extended-grid">
-                      <div>
-                        <span>Proceso</span>
-                        <strong>{entry.processCode || "Sin proceso"}</strong>
-                      </div>
-                      <div>
-                        <span>Codigo analisis</span>
-                        <strong>
-                          {entry.withAnalysis
-                            ? entry.analysisCode || "Sin codigo"
-                            : "No aplica"}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <div className="record-card__extended-grid">
-                      {entry.packagingMovements?.length ? (
-                        entry.packagingMovements.map((movement) => (
-                          <div key={movement.id}>
-                            <span>Envases</span>
-                            <strong>
-                              {movement.packagingType === "GRANEL"
-                                ? movement.packagingType.toLowerCase()
-                                : `${movement.quantity} ${movement.packagingType.toLowerCase()} ${movement.packagingCondition.toLowerCase()}`}
-                            </strong>
-                          </div>
-                        ))
-                      ) : (
-                        <div>
-                          <span>Envases</span>
-                          <strong>Sin envases cargados</strong>
-                        </div>
-                      )}
-                    </div>
-
-                    {entry.observations ? (
-                      <p className="samples-record__notes">
-                        {entry.observations}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-              </article>
-            ))
+            paginatedEntries.map((entry) =>
+              renderEntryRecord(entry, {
+                expanded: expandedEntryId === entry.id,
+              }),
+            )
           ) : (
             <div className="samples-empty-state">
               <strong>Sin descargas para esta vista</strong>
@@ -1291,26 +1381,32 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
           title="Descargas por fecha"
           action={
             <div className="natural-month-nav">
-              <button
-                type="button"
-                className="ghost-button compact-button"
-                onClick={() =>
-                  setActiveMonthKey((current) => shiftMonthKey(current, -1))
-                }
-                aria-label="Mes anterior"
-              >
-                <ChevronLeft size={16} />
+                <button
+                  type="button"
+                  className="ghost-button compact-button"
+                  onClick={() =>
+                    setActiveMonthKey((current) =>
+                      getAdjacentMonthKey(availableMonthKeys, current, -1),
+                    )
+                  }
+                  disabled={!hasPreviousMonth}
+                  aria-label="Mes anterior"
+                >
+                  <ChevronLeft size={16} />
               </button>
               <span>{formatMonthLabel(activeMonthKey)}</span>
-              <button
-                type="button"
-                className="ghost-button compact-button"
-                onClick={() =>
-                  setActiveMonthKey((current) => shiftMonthKey(current, 1))
-                }
-                aria-label="Mes siguiente"
-              >
-                <ChevronRight size={16} />
+                <button
+                  type="button"
+                  className="ghost-button compact-button"
+                  onClick={() =>
+                    setActiveMonthKey((current) =>
+                      getAdjacentMonthKey(availableMonthKeys, current, 1),
+                    )
+                  }
+                  disabled={!hasNextMonth}
+                  aria-label="Mes siguiente"
+                >
+                  <ChevronRight size={16} />
               </button>
             </div>
           }
@@ -1349,6 +1445,56 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
           </div>
         </SectionCard>
       </div>
+
+      {isPreparingPdf ? (
+        <PdfExportPortal>
+          <PdfExportRoot
+            ref={exportRef}
+            className="pdf-export-root--natural"
+          >
+            <div className="metric-grid samples-metric-grid">
+              <MetricCard
+                label="Registro de descargas"
+                value={formatInteger(filteredEntries.length)}
+                tone="sand"
+              />
+              <MetricCard
+                label="Stock en planta"
+                value={formatKg(totalNetKg)}
+                tone="olive"
+              />
+              <MetricCard
+                label="Analisis realizados"
+                value={formatInteger(analyzedEntries)}
+                tone="forest"
+              />
+            </div>
+
+            <PdfSelectedFiltersSection items={selectedFilterItems} />
+
+            <SectionCard title="Registro de descargas">
+              <div className="samples-inventory-list">
+                {sortedEntries.length ? (
+                  sortedEntries.map((entry) =>
+                    renderEntryRecord(entry, {
+                      expanded: true,
+                      exportMode: true,
+                    }),
+                  )
+                ) : (
+                  <div className="samples-empty-state">
+                    <strong>Sin descargas para esta vista</strong>
+                    <p>
+                      Ajusta los filtros o registra un nuevo ingreso desde el
+                      modal.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </SectionCard>
+          </PdfExportRoot>
+        </PdfExportPortal>
+      ) : null}
 
       {isModalOpen && hasMounted
         ? createPortal(

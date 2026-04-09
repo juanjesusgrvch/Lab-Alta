@@ -44,7 +44,14 @@ export const MetricCard = ({
 }: MetricCardProps) => (
   <article className={classNames("metric-card", `tone-${tone}`)}>
     <span>{label}</span>
-    <strong>{value}</strong>
+    <strong
+      className={classNames(
+        "metric-card__value",
+        value.trim().length >= 10 ? "metric-card__value--compact" : "",
+      )}
+    >
+      {value}
+    </strong>
     {caption ? <p>{caption}</p> : null}
   </article>
 );

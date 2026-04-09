@@ -57,6 +57,54 @@ export const DashboardHeader = ({
   );
   const ThemeIcon = themeMode === "dark" ? SunMedium : Moon;
   const sessionInitials = getSessionInitials(sessionLabel);
+  const renderSessionActions = ({
+    className,
+    includeAvatar,
+  }: {
+    className?: string;
+    includeAvatar: boolean;
+  }) => (
+    <div className={classNames("dashboard-console__actions", className)}>
+      <span className="dashboard-console__session-label" title={sessionLabel}>
+        {sessionLabel}
+      </span>
+
+      <button
+        type="button"
+        className="dashboard-console__theme-toggle"
+        onClick={onToggleTheme}
+        aria-pressed={themeMode === "light"}
+        aria-label={
+          themeMode === "dark"
+            ? "Cambiar a tema claro"
+            : "Cambiar a tema oscuro"
+        }
+      >
+        <ThemeIcon size={15} strokeWidth={1.9} />
+        <span>{themeMode === "dark" ? "Tema" : "Tema"}</span>
+      </button>
+
+      {includeAvatar ? (
+        <button
+          type="button"
+          className="dashboard-console__avatar"
+          aria-label={`Sesion activa de ${sessionLabel}`}
+        >
+          {sessionInitials}
+        </button>
+      ) : null}
+
+      <button
+        type="button"
+        className="dashboard-console__logout"
+        onClick={onSignOut}
+        aria-label="Cerrar sesion"
+      >
+        <LogOut size={15} strokeWidth={1.9} />
+        <span>Salir</span>
+      </button>
+    </div>
+  );
 
   useGSAP(
     () => {
@@ -137,47 +185,24 @@ export const DashboardHeader = ({
           </span>
         </div>
 
-        <div className="dashboard-console__actions">
-          <span
-            className="dashboard-console__session-label"
-            title={sessionLabel}
-          >
-            {sessionLabel}
-          </span>
+        {renderSessionActions({
+          className: "dashboard-console__actions--desktop",
+          includeAvatar: true,
+        })}
 
-          <button
-            type="button"
-            className="dashboard-console__theme-toggle"
-            onClick={onToggleTheme}
-            aria-pressed={themeMode === "light"}
-            aria-label={
-              themeMode === "dark"
-                ? "Cambiar a tema claro"
-                : "Cambiar a tema oscuro"
-            }
-          >
-            <ThemeIcon size={15} strokeWidth={1.9} />
-            <span>{themeMode === "dark" ? "Tema" : "Tema"}</span>
-          </button>
-
-          <button
-            type="button"
-            className="dashboard-console__avatar"
-            aria-label={`Sesion activa de ${sessionLabel}`}
+        <details className="dashboard-console__mobile-nav">
+          <summary
+            className="dashboard-console__avatar dashboard-console__menu-toggle"
+            aria-label={`Abrir menu de sesion de ${sessionLabel}`}
           >
             {sessionInitials}
-          </button>
+          </summary>
 
-          <button
-            type="button"
-            className="dashboard-console__logout"
-            onClick={onSignOut}
-            aria-label="Cerrar sesion"
-          >
-            <LogOut size={15} strokeWidth={1.9} />
-            <span>Salir</span>
-          </button>
-        </div>
+          {renderSessionActions({
+            className: "dashboard-console__actions--mobile",
+            includeAvatar: false,
+          })}
+        </details>
       </div>
 
       <div className="dashboard-console__deck">

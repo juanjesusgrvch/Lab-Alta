@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import {
   Bar,
   BarChart,
@@ -28,6 +28,12 @@ import {
 
 import { MetricCard, SectionCard } from "@/components/dashboard/primitives";
 import {
+  PdfExportPortal,
+  PdfExportRoot,
+  PdfSelectedFiltersSection,
+  type PdfExportFilterItem,
+} from "@/components/modules/pdf-export";
+import {
   defectCatalog,
   formatDefectLabel,
   normalizeDefectText,
@@ -51,7 +57,7 @@ import {
   saveRecord,
   subscribeToRecords,
 } from "@/lib/firestore-records";
-import { exportElementToPdf } from "@/lib/pdf";
+import { exportElementToPdf, waitForPdfLayout } from "@/lib/pdf";
 import {
   autofillUniqueRelationalSelections,
   areStringFiltersEqual,
@@ -346,25 +352,60 @@ const sortAnalysesByRecency = (left: DefectAnalysis, right: DefectAnalysis) => {
 
 const getMonthKey = (dateValue: string) => dateValue.slice(0, 7);
 
-const shiftMonthKey = (monthKey: string, delta: number) => {
-  const date = new Date(`${monthKey}-01T12:00:00`);
-  date.setMonth(date.getMonth() + delta);
+const parseMonthKey = (monthKey: string) => {
+  const match = /^(\d{4})-(\d{2})$/.exec(monthKey);
 
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-  }).format(date);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+
+  if (!Number.isInteger(year) || monthIndex < 0 || monthIndex > 11) {
+    return null;
+  }
+
+  return { year, monthIndex };
 };
 
 const formatMonthLabel = (monthKey: string) => {
+  const parsed = parseMonthKey(monthKey);
+
+  if (!parsed) {
+    return "Mes no disponible";
+  }
+
   const value = new Intl.DateTimeFormat("es-AR", {
     month: "long",
     year: "numeric",
     timeZone: "America/Buenos_Aires",
-  }).format(new Date(`${monthKey}-01T12:00:00`));
+  }).format(new Date(Date.UTC(parsed.year, parsed.monthIndex, 1, 12)));
 
   return value.charAt(0).toUpperCase() + value.slice(1);
+};
+
+const getAdjacentMonthKey = (
+  monthKeys: string[],
+  currentMonthKey: string,
+  delta: number,
+) => {
+  if (!monthKeys.length) {
+    return currentMonthKey;
+  }
+
+  const currentIndex = monthKeys.indexOf(currentMonthKey);
+
+  if (currentIndex === -1) {
+    return delta < 0 ? (monthKeys.at(-1) ?? currentMonthKey) : monthKeys[0];
+  }
+
+  const nextIndex = Math.min(
+    Math.max(currentIndex + (delta < 0 ? -1 : 1), 0),
+    monthKeys.length - 1,
+  );
+
+  return monthKeys[nextIndex];
 };
 
 const getLatestMonthKey = (analyses: DefectAnalysis[]) =>
@@ -445,6 +486,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     from: "",
     to: "",
   });
+  const [areFiltersVisible, setAreFiltersVisible] = useState(true);
   const [form, setForm] = useState<DefectFormState>(createEmptyForm);
   const [editingAnalysisId, setEditingAnalysisId] = useState<string | null>(
     null,
@@ -458,6 +500,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [hasMounted, setHasMounted] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isPreparingPdf, setIsPreparingPdf] = useState(false);
   const [isPersisting, setIsPersisting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(!isDemoMode);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -465,7 +508,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   const [expandedAnalysisId, setExpandedAnalysisId] = useState<string | null>(
     null,
   );
-  const panelRef = useRef<HTMLDivElement>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setHasMounted(true);
@@ -703,6 +746,16 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   );
   const averageGramajeHundredths =
     gramajeCount > 0 ? gramajeTotal / gramajeCount : 0;
+  const selectedFilterItems: PdfExportFilterItem[] = [
+    { label: "Cliente", value: filters.client },
+    { label: "Proveedor", value: filters.supplier },
+    { label: "Proceso", value: filters.processCode },
+    { label: "Producto", value: filters.product },
+    { label: "Salida en", value: filters.outputStage },
+    { label: "Defecto", value: filters.defect },
+    { label: "Desde", value: filters.from ? formatDate(filters.from) : "" },
+    { label: "Hasta", value: filters.to ? formatDate(filters.to) : "" },
+  ].filter((item) => item.value);
   const totalDefectGrams = filteredAnalyses.reduce(
     (sum, analysis) =>
       sum +
@@ -791,6 +844,13 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
       ),
     ),
   );
+  const availableTrendMonthKeys = Array.from(
+    new Set(
+      processScopedAnalyses.map((analysis) =>
+        getMonthKey(analysis.analysisDate),
+      ),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
 
   useEffect(() => {
     if (!activeProcessChart) {
@@ -847,6 +907,12 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
       grams: values.reduce((sum, value) => sum + value, 0) / values.length,
     }))
     .sort((left, right) => left.date.localeCompare(right.date));
+  const activeTrendMonthIndex =
+    availableTrendMonthKeys.indexOf(activeTrendMonth);
+  const hasPreviousTrendMonth = activeTrendMonthIndex > 0;
+  const hasNextTrendMonth =
+    activeTrendMonthIndex !== -1 &&
+    activeTrendMonthIndex < availableTrendMonthKeys.length - 1;
 
   const formRelationalFilters = {
     client: form.client,
@@ -1096,14 +1162,22 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   };
 
   const handleExport = async () => {
-    if (!panelRef.current) {
-      return;
-    }
-
     try {
       setIsExporting(true);
-      await exportElementToPdf(panelRef.current, "modulo-defectos");
+      flushSync(() => {
+        setIsPreparingPdf(true);
+      });
+      await waitForPdfLayout();
+
+      if (!exportRef.current) {
+        return;
+      }
+
+      await exportElementToPdf(exportRef.current, "modulo-defectos.pdf");
     } finally {
+      flushSync(() => {
+        setIsPreparingPdf(false);
+      });
       setIsExporting(false);
     }
   };
@@ -1136,6 +1210,11 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
       setFormError(
         "Agrega al menos un defecto con nombre para guardar el analisis.",
       );
+      return;
+    }
+
+    if (!form.defects[0]?.name.trim()) {
+      setFormError("El primer defecto es obligatorio para guardar el analisis.");
       return;
     }
 
@@ -1220,11 +1299,173 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     }
   };
 
+  const renderAnalysisRecord = (
+    analysis: DefectAnalysis,
+    {
+      expanded,
+      exportMode = false,
+    }: { expanded: boolean; exportMode?: boolean },
+  ) => {
+    const totalDefectGramsByAnalysis = analysis.defects.reduce(
+      (sum, defect) => sum + defect.grams,
+      0,
+    );
+    const totalDefectPercentByAnalysis = getDefectPercentage(
+      totalDefectGramsByAnalysis,
+      analysis.sampleWeightGr,
+    );
+
+    return (
+      <article
+        key={analysis.id}
+        className={`defects-history-card record-card--light${
+          expanded ? " is-expanded" : ""
+        }`}
+        {...(exportMode
+          ? {}
+          : {
+              role: "button" as const,
+              tabIndex: 0,
+              "aria-expanded": expanded,
+              onClick: () => toggleExpandedAnalysis(analysis.id),
+              onKeyDown: (event: React.KeyboardEvent<HTMLElement>) =>
+                handleExpandableCardKeyDown(event, analysis.id),
+            })}
+      >
+        <div className="defects-history-card__header">
+          <div>
+            <div className="defects-history-card__title">
+              <strong>{analysis.product || "SIN PRODUCTO"}</strong>
+            </div>
+            <p>
+              {analysis.client || "SIN CLIENTE"} /{" "}
+              {analysis.processCode || "SIN PROCESO"} /{" "}
+              {formatDate(analysis.analysisDate)}
+            </p>
+          </div>
+
+          {!exportMode ? (
+            <div className="defects-history-card__actions">
+              <button
+                type="button"
+                className="icon-button compact-icon-button compact-icon-button--view"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleExpandedAnalysis(analysis.id);
+                }}
+                aria-label={
+                  expanded
+                    ? "Ocultar detalle del analisis"
+                    : "Ver detalle del analisis"
+                }
+                title={expanded ? "Ocultar detalle" : "Vista extendida"}
+              >
+                {expanded ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+              <button
+                type="button"
+                className="icon-button compact-icon-button compact-icon-button--edit"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openEditModal(analysis);
+                }}
+                aria-label="Editar analisis"
+                title="Editar"
+              >
+                <Pencil size={15} />
+              </button>
+              <button
+                type="button"
+                className="icon-button compact-icon-button compact-icon-button--delete"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleDeleteAnalysis(analysis.id);
+                }}
+                aria-label="Eliminar analisis"
+                title="Eliminar"
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        {expanded ? (
+          <div className="record-card__extended">
+            <div className="record-card__extended-grid">
+              <div>
+                <span>Peso muestra</span>
+                <strong>{formatGrams(analysis.sampleWeightGr)}</strong>
+              </div>
+              <div>
+                <span>Gramaje</span>
+                <strong>
+                  {formatHundredths(analysis.gramajeHundredths ?? 0)}
+                </strong>
+              </div>
+              <div>
+                <span>Salida</span>
+                <strong>{analysis.outputStage || "Sin salida"}</strong>
+              </div>
+              <div>
+                <span>Proveedor</span>
+                <strong>{analysis.supplier || "Sin proveedor"}</strong>
+              </div>
+              <div>
+                <span>Humedad</span>
+                <strong>
+                  {analysis.humidity > 0
+                    ? `${formatCompactDecimal(analysis.humidity)} %`
+                    : "Sin dato"}
+                </strong>
+              </div>
+              <div>
+                <span>Analisis relacionado</span>
+                <strong>{analysis.relatedAnalysis || "Sin relacion"}</strong>
+              </div>
+              <div>
+                <span>Total defectos</span>
+                <strong>
+                  {formatGrams(totalDefectGramsByAnalysis)} (
+                  {formatPercent(totalDefectPercentByAnalysis)})
+                </strong>
+              </div>
+            </div>
+
+            <div className="record-card__extended-grid">
+              {analysis.defects.length ? (
+                analysis.defects.map((defect) => (
+                  <div key={defect.id}>
+                    <span>{formatDefectLabel(defect.name, defect.detail)}</span>
+                    <strong>
+                      {buildDefectSummary(defect, analysis.sampleWeightGr)}
+                    </strong>
+                  </div>
+                ))
+              ) : (
+                <div>
+                  <span>Defectos</span>
+                  <strong>Sin defectos detallados</strong>
+                </div>
+              )}
+            </div>
+
+            {analysis.observations ? (
+              <p className="defects-history-card__notes">
+                {analysis.observations}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </article>
+    );
+  };
+
   const liveSampleWeight =
     Math.max(0, toNumberOrZero(form.sampleWeightGr || 300)) || 300;
 
   return (
-    <div ref={panelRef} className="module-stack">
+    <div className="module-stack">
       <div className="metric-grid samples-metric-grid">
         <MetricCard
           label="Cantidad de analisis"
@@ -1257,150 +1498,164 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
       <SectionCard
         title="FILTROS"
         action={
-          <button
-            type="button"
-            className="text-button"
-            onClick={() =>
-              setFilters({
-                client: "",
-                supplier: "",
-                processCode: "",
-                product: "",
-                outputStage: "",
-                defect: "",
-                from: "",
-                to: "",
-              })
-            }
-          >
-            Limpiar
-          </button>
+          <div className="section-action-cluster">
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setAreFiltersVisible((current) => !current)}
+              aria-expanded={areFiltersVisible}
+            >
+              {areFiltersVisible ? "Ocultar filtros" : "Mostrar filtros"}
+            </button>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() =>
+                setFilters({
+                  client: "",
+                  supplier: "",
+                  processCode: "",
+                  product: "",
+                  outputStage: "",
+                  defect: "",
+                  from: "",
+                  to: "",
+                })
+              }
+            >
+              Limpiar
+            </button>
+          </div>
         }
         className="samples-filters-card"
       >
-        <div className="samples-filters-bar defects-filters-bar">
-          <label className="samples-filter-field">
-            Cliente
-            <select
-              value={filters.client}
-              onChange={(event) =>
-                handleFilterChange("client", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {clientOptions.map((client) => (
-                <option key={client} value={client}>
-                  {client}
-                </option>
-              ))}
-            </select>
-          </label>
+        {areFiltersVisible ? (
+          <div className="samples-filters-bar defects-filters-bar">
+            <label className="samples-filter-field">
+              Cliente
+              <select
+                value={filters.client}
+                onChange={(event) =>
+                  handleFilterChange("client", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {clientOptions.map((client) => (
+                  <option key={client} value={client}>
+                    {client}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Proveedor
-            <select
-              value={filters.supplier}
-              onChange={(event) =>
-                handleFilterChange("supplier", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {supplierOptions.map((supplier) => (
-                <option key={supplier} value={supplier}>
-                  {supplier}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="samples-filter-field">
+              Proveedor
+              <select
+                value={filters.supplier}
+                onChange={(event) =>
+                  handleFilterChange("supplier", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {supplierOptions.map((supplier) => (
+                  <option key={supplier} value={supplier}>
+                    {supplier}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Proceso
-            <select
-              value={filters.processCode}
-              onChange={(event) =>
-                handleFilterChange("processCode", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {processOptions.map((processCode) => (
-                <option key={processCode} value={processCode}>
-                  {processCode}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="samples-filter-field">
+              Proceso
+              <select
+                value={filters.processCode}
+                onChange={(event) =>
+                  handleFilterChange("processCode", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {processOptions.map((processCode) => (
+                  <option key={processCode} value={processCode}>
+                    {processCode}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Producto
-            <select
-              value={filters.product}
-              onChange={(event) =>
-                handleFilterChange("product", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {productOptions.map((product) => (
-                <option key={product} value={product}>
-                  {product}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="samples-filter-field">
+              Producto
+              <select
+                value={filters.product}
+                onChange={(event) =>
+                  handleFilterChange("product", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {productOptions.map((product) => (
+                  <option key={product} value={product}>
+                    {product}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Salida en
-            <select
-              value={filters.outputStage}
-              onChange={(event) =>
-                handleFilterChange("outputStage", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {outputStageOptionsForFilter.map((outputStage) => (
-                <option key={outputStage} value={outputStage}>
-                  {outputStage}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="samples-filter-field">
+              Salida en
+              <select
+                value={filters.outputStage}
+                onChange={(event) =>
+                  handleFilterChange("outputStage", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {outputStageOptionsForFilter.map((outputStage) => (
+                  <option key={outputStage} value={outputStage}>
+                    {outputStage}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Defecto
-            <select
-              value={filters.defect}
-              onChange={(event) =>
-                handleFilterChange("defect", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {defectOptions.map((defect) => (
-                <option key={defect} value={defect}>
-                  {defect}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="samples-filter-field">
+              Defecto
+              <select
+                value={filters.defect}
+                onChange={(event) =>
+                  handleFilterChange("defect", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {defectOptions.map((defect) => (
+                  <option key={defect} value={defect}>
+                    {defect}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Desde
-            <input
-              type="date"
-              value={filters.from}
-              onChange={(event) =>
-                handleFilterChange("from", event.target.value)
-              }
-            />
-          </label>
+            <label className="samples-filter-field">
+              Desde
+              <input
+                type="date"
+                value={filters.from}
+                onChange={(event) =>
+                  handleFilterChange("from", event.target.value)
+                }
+              />
+            </label>
 
-          <label className="samples-filter-field">
-            Hasta
-            <input
-              type="date"
-              value={filters.to}
-              onChange={(event) => handleFilterChange("to", event.target.value)}
-            />
-          </label>
-        </div>
+            <label className="samples-filter-field">
+              Hasta
+              <input
+                type="date"
+                value={filters.to}
+                onChange={(event) =>
+                  handleFilterChange("to", event.target.value)
+                }
+              />
+            </label>
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard
@@ -1425,177 +1680,11 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
       >
         <div className="defects-history-list">
           {paginatedAnalyses.length ? (
-            paginatedAnalyses.map((analysis) => {
-              const totalDefectGramsByAnalysis = analysis.defects.reduce(
-                (sum, defect) => sum + defect.grams,
-                0,
-              );
-              const totalDefectPercentByAnalysis = getDefectPercentage(
-                totalDefectGramsByAnalysis,
-                analysis.sampleWeightGr,
-              );
-
-              return (
-                <article
-                  key={analysis.id}
-                  className={`defects-history-card record-card--light${
-                    expandedAnalysisId === analysis.id ? " is-expanded" : ""
-                  }`}
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={expandedAnalysisId === analysis.id}
-                  onClick={() => toggleExpandedAnalysis(analysis.id)}
-                  onKeyDown={(event) =>
-                    handleExpandableCardKeyDown(event, analysis.id)
-                  }
-                >
-                  <div className="defects-history-card__header">
-                    <div>
-                      <div className="defects-history-card__title">
-                        <strong>{analysis.product || "SIN PRODUCTO"}</strong>
-                      </div>
-                      <p>
-                        {analysis.client || "SIN CLIENTE"} /{" "}
-                        {analysis.processCode || "SIN PROCESO"} /{" "}
-                        {formatDate(analysis.analysisDate)}
-                      </p>
-                    </div>
-
-                    <div className="defects-history-card__actions">
-                      <button
-                        type="button"
-                        className="icon-button compact-icon-button compact-icon-button--view"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleExpandedAnalysis(analysis.id);
-                        }}
-                        aria-label={
-                          expandedAnalysisId === analysis.id
-                            ? "Ocultar detalle del analisis"
-                            : "Ver detalle del analisis"
-                        }
-                        title={
-                          expandedAnalysisId === analysis.id
-                            ? "Ocultar detalle"
-                            : "Vista extendida"
-                        }
-                      >
-                        {expandedAnalysisId === analysis.id ? (
-                          <EyeOff size={15} />
-                        ) : (
-                          <Eye size={15} />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-button compact-icon-button compact-icon-button--edit"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openEditModal(analysis);
-                        }}
-                        aria-label="Editar analisis"
-                        title="Editar"
-                      >
-                        <Pencil size={15} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-button compact-icon-button compact-icon-button--delete"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleDeleteAnalysis(analysis.id);
-                        }}
-                        aria-label="Eliminar analisis"
-                        title="Eliminar"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {expandedAnalysisId === analysis.id ? (
-                    <div className="record-card__extended">
-                      <div className="record-card__extended-grid">
-                        <div>
-                          <span>Peso muestra</span>
-                          <strong>
-                            {formatGrams(analysis.sampleWeightGr)}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Gramaje</span>
-                          <strong>
-                            {formatHundredths(analysis.gramajeHundredths ?? 0)}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Salida</span>
-                          <strong>
-                            {analysis.outputStage || "Sin salida"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Proveedor</span>
-                          <strong>
-                            {analysis.supplier || "Sin proveedor"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Humedad</span>
-                          <strong>
-                            {analysis.humidity > 0
-                              ? `${formatCompactDecimal(analysis.humidity)} %`
-                              : "Sin dato"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Analisis relacionado</span>
-                          <strong>
-                            {analysis.relatedAnalysis || "Sin relacion"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Total defectos</span>
-                          <strong>
-                            {formatGrams(totalDefectGramsByAnalysis)} (
-                            {formatPercent(totalDefectPercentByAnalysis)})
-                          </strong>
-                        </div>
-                      </div>
-
-                      <div className="record-card__extended-grid">
-                        {analysis.defects.length ? (
-                          analysis.defects.map((defect) => (
-                            <div key={defect.id}>
-                              <span>
-                                {formatDefectLabel(defect.name, defect.detail)}
-                              </span>
-                              <strong>
-                                {buildDefectSummary(
-                                  defect,
-                                  analysis.sampleWeightGr,
-                                )}
-                              </strong>
-                            </div>
-                          ))
-                        ) : (
-                          <div>
-                            <span>Defectos</span>
-                            <strong>Sin defectos detallados</strong>
-                          </div>
-                        )}
-                      </div>
-
-                      {analysis.observations ? (
-                        <p className="defects-history-card__notes">
-                          {analysis.observations}
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </article>
-              );
-            })
+            paginatedAnalyses.map((analysis) =>
+              renderAnalysisRecord(analysis, {
+                expanded: expandedAnalysisId === analysis.id,
+              }),
+            )
           ) : (
             <div className="samples-empty-state">
               <strong>No hay analisis para esta vista</strong>
@@ -1815,9 +1904,15 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
                   type="button"
                   className="ghost-button compact-button"
                   onClick={() =>
-                    setActiveTrendMonth((current) => shiftMonthKey(current, -1))
+                    setActiveTrendMonth((current) =>
+                      getAdjacentMonthKey(availableTrendMonthKeys, current, -1),
+                    )
                   }
-                  disabled={!activeProcessChart || !activeDefectChart}
+                  disabled={
+                    !activeProcessChart ||
+                    !activeDefectChart ||
+                    !hasPreviousTrendMonth
+                  }
                   aria-label="Mes anterior"
                 >
                   <ChevronLeft size={16} />
@@ -1827,9 +1922,15 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
                   type="button"
                   className="ghost-button compact-button"
                   onClick={() =>
-                    setActiveTrendMonth((current) => shiftMonthKey(current, 1))
+                    setActiveTrendMonth((current) =>
+                      getAdjacentMonthKey(availableTrendMonthKeys, current, 1),
+                    )
                   }
-                  disabled={!activeProcessChart || !activeDefectChart}
+                  disabled={
+                    !activeProcessChart ||
+                    !activeDefectChart ||
+                    !hasNextTrendMonth
+                  }
                   aria-label="Mes siguiente"
                 >
                   <ChevronRight size={16} />
@@ -1903,6 +2004,53 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
           </div>
         </SectionCard>
       </div>
+
+      {isPreparingPdf ? (
+        <PdfExportPortal>
+          <PdfExportRoot ref={exportRef} className="pdf-export-root--defects">
+            <div className="metric-grid samples-metric-grid">
+              <MetricCard
+                label="Cantidad de analisis"
+                value={formatInteger(filteredAnalyses.length)}
+                tone="sand"
+              />
+              <MetricCard
+                label="Gr analizados"
+                value={formatGrams(totalSampleGr)}
+                tone="olive"
+              />
+              <MetricCard
+                label="Gramaje promedio"
+                value={formatHundredths(averageGramajeHundredths)}
+                tone="forest"
+              />
+            </div>
+
+            <PdfSelectedFiltersSection items={selectedFilterItems} />
+
+            <SectionCard title="Historial de analisis">
+              <div className="defects-history-list">
+                {sortedFilteredAnalyses.length ? (
+                  sortedFilteredAnalyses.map((analysis) =>
+                    renderAnalysisRecord(analysis, {
+                      expanded: true,
+                      exportMode: true,
+                    }),
+                  )
+                ) : (
+                  <div className="samples-empty-state">
+                    <strong>No hay analisis para esta vista</strong>
+                    <p>
+                      Ajusta los filtros o registra un nuevo analisis desde el
+                      modal.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </SectionCard>
+          </PdfExportRoot>
+        </PdfExportPortal>
+      ) : null}
 
       {isModalOpen && hasMounted
         ? createPortal(
@@ -2018,22 +2166,6 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
                           }
                         />
                       </label>
-
-                      <label>
-                        PESO MUESTRA *
-                        <input
-                          type="number"
-                          min="0"
-                          required
-                          value={form.sampleWeightGr}
-                          onChange={(event) =>
-                            handleTextFieldChange(
-                              "sampleWeightGr",
-                              event.target.value,
-                            )
-                          }
-                        />
-                      </label>
                     </div>
 
                     <div className="stack-form defects-form-subsection">
@@ -2099,6 +2231,22 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
                           }
                         />
                       </label>
+
+                      <label>
+                        PESO MUESTRA *
+                        <input
+                          type="number"
+                          min="0"
+                          required
+                          value={form.sampleWeightGr}
+                          onChange={(event) =>
+                            handleTextFieldChange(
+                              "sampleWeightGr",
+                              event.target.value,
+                            )
+                          }
+                        />
+                      </label>
                     </div>
                   </div>
 
@@ -2121,18 +2269,10 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
                           calcula sobre {formatGrams(liveSampleWeight)}.
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        className="ghost-button compact-button"
-                        onClick={handleAddDefectRow}
-                      >
-                        <Plus size={14} />
-                        Agregar fila
-                      </button>
                     </div>
 
                     <div className="defects-form-list">
-                      {form.defects.map((defect) => {
+                      {form.defects.map((defect, index) => {
                         const needsDetail = requiresDefectDetail(defect.name);
                         const defectPercentage = getDefectPercentage(
                           toNumberOrZero(defect.grams),
@@ -2141,25 +2281,45 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
 
                         return (
                           <div key={defect.id} className="defects-form-row">
-                            <label className="defects-form-row__label defects-form-row__label--wide">
-                              Defecto
-                              <input
-                                type="text"
-                                list="defects-name-options"
-                                className="samples-uppercase-input"
-                                value={defect.name}
-                                onChange={(event) =>
-                                  handleDefectFieldChange(
-                                    defect.id,
-                                    "name",
-                                    event.target.value,
-                                  )
-                                }
-                              />
-                            </label>
+                            <div className="defects-form-row__main">
+                              <label className="defects-form-row__label defects-form-row__label--wide">
+                                Defecto {index === 0 ? "*" : ""}
+                                <input
+                                  type="text"
+                                  list="defects-name-options"
+                                  className="samples-uppercase-input"
+                                  required={index === 0}
+                                  value={defect.name}
+                                  onChange={(event) =>
+                                    handleDefectFieldChange(
+                                      defect.id,
+                                      "name",
+                                      event.target.value,
+                                    )
+                                  }
+                                />
+                              </label>
+
+                              <label className="defects-form-row__label defects-form-row__label--grams">
+                                Gramos
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={defect.grams}
+                                  onChange={(event) =>
+                                    handleDefectFieldChange(
+                                      defect.id,
+                                      "grams",
+                                      event.target.value,
+                                    )
+                                  }
+                                />
+                              </label>
+                            </div>
 
                             {needsDetail ? (
-                              <label className="defects-form-row__label">
+                              <label className="defects-form-row__label defects-form-row__detail">
                                 Detalle
                                 <input
                                   type="text"
@@ -2174,43 +2334,37 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
                                   }
                                 />
                               </label>
-                            ) : (
-                              <div className="defects-form-row__ghost" />
-                            )}
+                            ) : null}
 
-                            <label className="defects-form-row__label">
-                              Gramos
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={defect.grams}
-                                onChange={(event) =>
-                                  handleDefectFieldChange(
-                                    defect.id,
-                                    "grams",
-                                    event.target.value,
-                                  )
-                                }
-                              />
-                            </label>
+                            <div className="defects-form-row__footer">
+                              <span className="defects-form-row__pct">
+                                {formatPercent(defectPercentage)}
+                              </span>
 
-                            <span className="defects-form-row__pct">
-                              {formatPercent(defectPercentage)}
-                            </span>
-
-                            <button
-                              type="button"
-                              className="ghost-button compact-button danger-button"
-                              onClick={() => handleRemoveDefectRow(defect.id)}
-                              disabled={form.defects.length === 1}
-                              aria-label="Eliminar fila de defecto"
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                              <button
+                                type="button"
+                                className="ghost-button compact-button danger-button"
+                                onClick={() => handleRemoveDefectRow(defect.id)}
+                                disabled={form.defects.length === 1}
+                                aria-label="Eliminar fila de defecto"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
                           </div>
                         );
                       })}
+                    </div>
+
+                    <div className="defects-form-actions">
+                      <button
+                        type="button"
+                        className="ghost-button compact-button"
+                        onClick={handleAddDefectRow}
+                      >
+                        <Plus size={14} />
+                        Agregar defecto
+                      </button>
                     </div>
                   </div>
 

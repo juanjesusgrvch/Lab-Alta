@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import {
   Bar,
   BarChart,
@@ -30,6 +30,12 @@ import {
 
 import { MetricCard, SectionCard } from "@/components/dashboard/primitives";
 import {
+  PdfExportPortal,
+  PdfExportRoot,
+  PdfSelectedFiltersSection,
+  type PdfExportFilterItem,
+} from "@/components/modules/pdf-export";
+import {
   formatDate,
   formatHundredths,
   formatInteger,
@@ -43,7 +49,7 @@ import {
   saveRecord,
   subscribeToRecords,
 } from "@/lib/firestore-records";
-import { exportElementToPdf } from "@/lib/pdf";
+import { exportElementToPdf, waitForPdfLayout } from "@/lib/pdf";
 import {
   autofillUniqueRelationalSelections,
   areStringFiltersEqual,
@@ -270,9 +276,11 @@ export const SamplesModule = ({
     processCode: "",
     status: "",
   });
+  const [areFiltersVisible, setAreFiltersVisible] = useState(true);
   const [form, setForm] = useState(createEmptyForm);
   const [editingSampleId, setEditingSampleId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [isPreparingPdf, setIsPreparingPdf] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [isRetentionPreset, setIsRetentionPreset] = useState(true);
@@ -282,7 +290,7 @@ export const SamplesModule = ({
   const [syncError, setSyncError] = useState<string | null>(null);
   const [expandedSampleId, setExpandedSampleId] = useState<string | null>(null);
   const [sampleToRelease, setSampleToRelease] = useState<StoredSample | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
   const deletingReleasedIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -529,6 +537,13 @@ export const SamplesModule = ({
 
     return sample.retentionUntil >= today && sample.retentionUntil <= expiringSoonLimit;
   }).length;
+  const selectedFilterItems: PdfExportFilterItem[] = [
+    { label: "Cliente", value: filters.client },
+    { label: "Proveedor", value: filters.supplier },
+    { label: "Producto", value: filters.product },
+    { label: "Proceso", value: filters.processCode },
+    { label: "Estado", value: filters.status },
+  ].filter((item) => item.value);
 
   const productMap = new Map<string, { count: number; totalKg: number }>();
   const statusMap = new Map<StoredSample["status"], number>([
@@ -846,15 +861,23 @@ export const SamplesModule = ({
   };
 
   const handleExport = async () => {
-    if (!panelRef.current) {
-      return;
-    }
-
     setIsExporting(true);
 
     try {
-      await exportElementToPdf(panelRef.current, "muestras-deposito.pdf");
+      flushSync(() => {
+        setIsPreparingPdf(true);
+      });
+      await waitForPdfLayout();
+
+      if (!exportRef.current) {
+        return;
+      }
+
+      await exportElementToPdf(exportRef.current, "muestras-deposito.pdf");
     } finally {
+      flushSync(() => {
+        setIsPreparingPdf(false);
+      });
       setIsExporting(false);
     }
   };
@@ -942,8 +965,174 @@ export const SamplesModule = ({
     }
   };
 
+  const renderSampleRecord = (
+    sample: StoredSample,
+    {
+      expanded,
+      exportMode = false,
+    }: { expanded: boolean; exportMode?: boolean },
+  ) => {
+    const sampleStatus = getSampleStatus(sample, today);
+
+    return (
+      <article
+        key={sample.id}
+        className={`samples-record record-card--light${
+          expanded ? " is-expanded" : ""
+        }`}
+        {...(exportMode
+          ? {}
+          : {
+              role: "button" as const,
+              tabIndex: 0,
+              "aria-expanded": expanded,
+              onClick: () => toggleExpandedSample(sample.id),
+              onKeyDown: (event: React.KeyboardEvent<HTMLElement>) =>
+                handleExpandableCardKeyDown(event, sample.id),
+            })}
+      >
+        <div className="samples-record__primary">
+          <div>
+            <div className="samples-record__title">
+              <strong>{sample.sampleCode || "Sin codigo"}</strong>
+            </div>
+            <p>{sample.product || "Sin producto"}</p>
+            <p className="record-card__summary">{sampleStatus}</p>
+          </div>
+
+          {!exportMode ? (
+            <div
+              className="natural-record__actions"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="icon-button compact-icon-button compact-icon-button--view"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleExpandedSample(sample.id);
+                }}
+                aria-label={
+                  expanded
+                    ? "Ocultar detalle de la muestra"
+                    : "Ver detalle de la muestra"
+                }
+                title={expanded ? "Ocultar detalle" : "Vista extendida"}
+              >
+                {expanded ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+              <button
+                type="button"
+                className="icon-button compact-icon-button compact-icon-button--edit"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openEditModal(sample);
+                }}
+                aria-label="Editar muestra"
+                title="Editar"
+              >
+                <Pencil size={15} />
+              </button>
+              <button
+                type="button"
+                className="icon-button compact-icon-button compact-icon-button--release"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setSampleToRelease(sample);
+                }}
+                aria-label={
+                  sampleStatus === "Liberada"
+                    ? "Volver la muestra al estado activa"
+                    : "Liberar muestra"
+                }
+                title={
+                  sampleStatus === "Liberada"
+                    ? "Volver a activa"
+                    : "Liberar muestra"
+                }
+              >
+                <BadgeCheck size={15} />
+              </button>
+              <button
+                type="button"
+                className="icon-button compact-icon-button compact-icon-button--delete"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleDeleteSample(sample.id);
+                }}
+                aria-label="Eliminar muestra"
+                title="Eliminar"
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        {expanded ? (
+          <div className="record-card__extended">
+            <div className="record-card__extended-grid">
+              <div>
+                <span>Cliente</span>
+                <strong>{sample.client || "Sin cliente"}</strong>
+              </div>
+              <div>
+                <span>Proceso</span>
+                <strong>{sample.processCode || "Sin proceso"}</strong>
+              </div>
+              <div>
+                <span>Proveedor</span>
+                <strong>{sample.supplier || "Sin proveedor"}</strong>
+              </div>
+              <div>
+                <span>Fecha</span>
+                <strong>{formatDate(sample.storedAt)}</strong>
+              </div>
+              <div>
+                <span>Retener hasta</span>
+                <strong>{formatDate(sample.retentionUntil)}</strong>
+              </div>
+              <div>
+                <span>Gramaje</span>
+                <strong>
+                  {sample.gramajeHundredths != null && sample.gramajeHundredths > 0
+                    ? formatHundredths(sample.gramajeHundredths)
+                    : "Sin dato"}
+                </strong>
+              </div>
+              <div>
+                <span>Analisis relacionado</span>
+                <strong>{sample.relatedAnalysisId || "Sin vinculo"}</strong>
+              </div>
+              <div>
+                <span>Cantidad lote</span>
+                <strong>
+                  {sample.quantityKg > 0
+                    ? formatKg(sample.quantityKg)
+                    : "No aplica"}
+                </strong>
+              </div>
+              {sample.status === "Liberada" ? (
+                <div>
+                  <span>Fecha de liberacion</span>
+                  <strong>
+                    {sample.releasedAt ? formatDate(sample.releasedAt) : "Sin fecha"}
+                  </strong>
+                </div>
+              ) : null}
+            </div>
+
+            {sample.notes ? (
+              <p className="samples-record__notes">{sample.notes}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </article>
+    );
+  };
+
   return (
-    <div ref={panelRef} className="module-stack">
+    <div className="module-stack">
       <div className="metric-grid samples-metric-grid">
         <MetricCard
           label="Total muestras activas"
@@ -976,110 +1165,122 @@ export const SamplesModule = ({
       <SectionCard
         title="FILTROS"
         action={
-          <button
-            type="button"
-            className="text-button"
-            onClick={() =>
-              setFilters({
-                client: "",
-                supplier: "",
-                product: "",
-                processCode: "",
-                status: "",
-              })
-            }
-          >
-            Limpiar
-          </button>
+          <div className="section-action-cluster">
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setAreFiltersVisible((current) => !current)}
+              aria-expanded={areFiltersVisible}
+            >
+              {areFiltersVisible ? "Ocultar filtros" : "Mostrar filtros"}
+            </button>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() =>
+                setFilters({
+                  client: "",
+                  supplier: "",
+                  product: "",
+                  processCode: "",
+                  status: "",
+                })
+              }
+            >
+              Limpiar
+            </button>
+          </div>
         }
         className="samples-filters-card"
       >
-        <div className="samples-filters-bar">
-          <label className="samples-filter-field">
-            Cliente
-            <select
-              value={filters.client}
-              onChange={(event) =>
-                handleFilterChange("client", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {clientOptions.map((client) => (
-                <option key={client} value={client}>
-                  {client}
-                </option>
-              ))}
-            </select>
-          </label>
+        {areFiltersVisible ? (
+          <div className="samples-filters-bar">
+            <label className="samples-filter-field">
+              Cliente
+              <select
+                value={filters.client}
+                onChange={(event) =>
+                  handleFilterChange("client", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {clientOptions.map((client) => (
+                  <option key={client} value={client}>
+                    {client}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Proveedor
-            <select
-              value={filters.supplier}
-              onChange={(event) =>
-                handleFilterChange("supplier", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {supplierOptions.map((supplier) => (
-                <option key={supplier} value={supplier}>
-                  {supplier}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="samples-filter-field">
+              Proveedor
+              <select
+                value={filters.supplier}
+                onChange={(event) =>
+                  handleFilterChange("supplier", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {supplierOptions.map((supplier) => (
+                  <option key={supplier} value={supplier}>
+                    {supplier}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Producto
-            <select
-              value={filters.product}
-              onChange={(event) =>
-                handleFilterChange("product", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {productOptions.map((product) => (
-                <option key={product} value={product}>
-                  {product}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="samples-filter-field">
+              Producto
+              <select
+                value={filters.product}
+                onChange={(event) =>
+                  handleFilterChange("product", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {productOptions.map((product) => (
+                  <option key={product} value={product}>
+                    {product}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Proceso
-            <select
-              value={filters.processCode}
-              onChange={(event) =>
-                handleFilterChange("processCode", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {processOptions.map((processCode) => (
-                <option key={processCode} value={processCode}>
-                  {processCode}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="samples-filter-field">
+              Proceso
+              <select
+                value={filters.processCode}
+                onChange={(event) =>
+                  handleFilterChange("processCode", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {processOptions.map((processCode) => (
+                  <option key={processCode} value={processCode}>
+                    {processCode}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="samples-filter-field">
-            Estado
-            <select
-              value={filters.status}
-              onChange={(event) =>
-                handleFilterChange("status", event.target.value)
-              }
-            >
-              <option value="">Todos</option>
-              {statusOptions.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+            <label className="samples-filter-field">
+              Estado
+              <select
+                value={filters.status}
+                onChange={(event) =>
+                  handleFilterChange("status", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {statusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard
@@ -1105,173 +1306,11 @@ export const SamplesModule = ({
       >
         <div className="samples-inventory-list">
           {paginatedSamples.length ? (
-            paginatedSamples.map((sample) => {
-              const sampleStatus = getSampleStatus(sample, today);
-
-              return (
-                <article
-                  key={sample.id}
-                  className={`samples-record record-card--light${
-                    expandedSampleId === sample.id ? " is-expanded" : ""
-                  }`}
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={expandedSampleId === sample.id}
-                  onClick={() => toggleExpandedSample(sample.id)}
-                  onKeyDown={(event) =>
-                    handleExpandableCardKeyDown(event, sample.id)
-                  }
-                >
-                <div className="samples-record__primary">
-                  <div>
-                    <div className="samples-record__title">
-                      <strong>{sample.sampleCode || "Sin codigo"}</strong>
-                    </div>
-                    <p>{sample.product || "Sin producto"}</p>
-                    <p className="record-card__summary">{sampleStatus}</p>
-                  </div>
-
-                  <div
-                    className="natural-record__actions"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <button
-                      type="button"
-                      className="icon-button compact-icon-button compact-icon-button--view"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleExpandedSample(sample.id);
-                      }}
-                      aria-label={
-                        expandedSampleId === sample.id
-                          ? "Ocultar detalle de la muestra"
-                          : "Ver detalle de la muestra"
-                      }
-                      title={
-                        expandedSampleId === sample.id
-                          ? "Ocultar detalle"
-                          : "Vista extendida"
-                      }
-                    >
-                      {expandedSampleId === sample.id ? (
-                        <EyeOff size={15} />
-                      ) : (
-                        <Eye size={15} />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button compact-icon-button compact-icon-button--edit"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openEditModal(sample);
-                      }}
-                      aria-label="Editar muestra"
-                      title="Editar"
-                    >
-                      <Pencil size={15} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button compact-icon-button compact-icon-button--release"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setSampleToRelease(sample);
-                      }}
-                      aria-label={
-                        sampleStatus === "Liberada"
-                          ? "Volver la muestra al estado activa"
-                          : "Liberar muestra"
-                      }
-                      title={
-                        sampleStatus === "Liberada"
-                          ? "Volver a activa"
-                          : "Liberar muestra"
-                      }
-                    >
-                      <BadgeCheck size={15} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button compact-icon-button compact-icon-button--delete"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleDeleteSample(sample.id);
-                      }}
-                      aria-label="Eliminar muestra"
-                      title="Eliminar"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
-
-                {expandedSampleId === sample.id ? (
-                  <div className="record-card__extended">
-                    <div className="record-card__extended-grid">
-                      <div>
-                        <span>Cliente</span>
-                        <strong>{sample.client || "Sin cliente"}</strong>
-                      </div>
-                      <div>
-                        <span>Proceso</span>
-                        <strong>{sample.processCode || "Sin proceso"}</strong>
-                      </div>
-                      <div>
-                        <span>Proveedor</span>
-                        <strong>{sample.supplier || "Sin proveedor"}</strong>
-                      </div>
-                      <div>
-                        <span>Fecha</span>
-                        <strong>{formatDate(sample.storedAt)}</strong>
-                      </div>
-                      <div>
-                        <span>Retener hasta</span>
-                        <strong>{formatDate(sample.retentionUntil)}</strong>
-                      </div>
-                      <div>
-                        <span>Gramaje</span>
-                        <strong>
-                          {sample.gramajeHundredths != null &&
-                          sample.gramajeHundredths > 0
-                            ? formatHundredths(sample.gramajeHundredths)
-                            : "Sin dato"}
-                        </strong>
-                      </div>
-                      <div>
-                        <span>Analisis relacionado</span>
-                        <strong>
-                          {sample.relatedAnalysisId || "Sin vinculo"}
-                        </strong>
-                      </div>
-                      <div>
-                        <span>Cantidad lote</span>
-                        <strong>
-                          {sample.quantityKg > 0
-                            ? formatKg(sample.quantityKg)
-                            : "No aplica"}
-                        </strong>
-                      </div>
-                      {sample.status === "Liberada" ? (
-                        <div>
-                          <span>Fecha de liberacion</span>
-                          <strong>
-                            {sample.releasedAt
-                              ? formatDate(sample.releasedAt)
-                              : "Sin fecha"}
-                          </strong>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    {sample.notes ? (
-                      <p className="samples-record__notes">{sample.notes}</p>
-                    ) : null}
-                  </div>
-                ) : null}
-                </article>
-              );
-            })
+            paginatedSamples.map((sample) =>
+              renderSampleRecord(sample, {
+                expanded: expandedSampleId === sample.id,
+              }),
+            )
           ) : (
             <div className="samples-empty-state">
               <strong>Sin resultados para esta vista</strong>
@@ -1364,6 +1403,59 @@ export const SamplesModule = ({
           </div>
         </SectionCard>
       </div>
+
+      {isPreparingPdf ? (
+        <PdfExportPortal>
+          <PdfExportRoot
+            ref={exportRef}
+            className="pdf-export-root--samples"
+          >
+            <div className="metric-grid samples-metric-grid">
+              <MetricCard
+                label="Total muestras activas"
+                value={formatInteger(totalActiveSamples)}
+                tone="forest"
+              />
+              <MetricCard
+                label="Total muestras vencidas"
+                value={formatInteger(totalExpiredSamples)}
+                tone="rust"
+              />
+              <MetricCard
+                label="Proximas a vencer"
+                value={formatInteger(expiringSoon)}
+                tone="sand"
+              />
+            </div>
+
+            <PdfSelectedFiltersSection items={selectedFilterItems} />
+
+            <SectionCard
+              title="Inventario reciente"
+              className="samples-inventory-card"
+            >
+              <div className="samples-inventory-list">
+                {sortedFilteredSamples.length ? (
+                  sortedFilteredSamples.map((sample) =>
+                    renderSampleRecord(sample, {
+                      expanded: true,
+                      exportMode: true,
+                    }),
+                  )
+                ) : (
+                  <div className="samples-empty-state">
+                    <strong>Sin resultados para esta vista</strong>
+                    <p>
+                      Ajusta los filtros o agrega una nueva muestra para poblar
+                      el inventario.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </SectionCard>
+          </PdfExportRoot>
+        </PdfExportPortal>
+      ) : null}
 
       {isModalOpen && hasMounted
         ? createPortal(
