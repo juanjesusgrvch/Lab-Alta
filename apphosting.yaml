@@ -1,10 +1,45 @@
 # Firebase App Hosting:
-# - La configuracion web de Firebase se inyecta automaticamente en el build
-#   mediante FIREBASE_WEBAPP_CONFIG.
+# - Publicamos NEXT_PUBLIC_FIREBASE_* en BUILD y RUNTIME porque el cliente
+#   y la ruta /api/auth/login las leen directamente en Next.js.
 # - La site key de Turnstile es publica y debe estar disponible en BUILD
 #   y RUNTIME para que Next.js pueda renderizar el widget en el login.
 # - El secret de Turnstile vive solo en Cloud Secret Manager.
 env:
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyAZjvIFLnf57y9VJiwzyw9ObLNl8kPWsVU
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: lab-alta.firebaseapp.com
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: lab-alta
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: lab-alta.firebasestorage.app
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: 963670520154
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: 1:963670520154:web:84783319441c6383a14363
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
+    value: G-RHKSEW5HZH
+    availability:
+      - BUILD
+      - RUNTIME
   - variable: NEXT_PUBLIC_TURNSTILE_SITE_KEY
     value: 0x4AAAAAAC2ONQ6ycD47hTv0
     availability:
