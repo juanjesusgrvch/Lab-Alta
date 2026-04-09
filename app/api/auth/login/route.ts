@@ -10,7 +10,9 @@ import { verifyTurnstileToken } from "@/lib/server/turnstile";
 
 const identityToolkitUrl =
   "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword";
-const allowDevelopmentClientFallback = process.env.NODE_ENV !== "production";
+const requireServerCustomToken =
+  process.env.AUTH_REQUIRE_SERVER_CUSTOM_TOKEN?.trim() === "true";
+const allowClientPasswordFallback = !requireServerCustomToken;
 
 const getClientIp = (request: Request) =>
   request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "";
@@ -208,8 +210,8 @@ export async function POST(request: Request) {
   } catch (error) {
     const diagnostic = getAdminCredentialDiagnostic();
 
-    if (allowDevelopmentClientFallback) {
-      console.warn("Secure auth fallback enabled in development.", {
+    if (allowClientPasswordFallback) {
+      console.warn("Secure auth custom token unavailable. Falling back to client password sign-in.", {
         error,
         diagnostic,
       });

@@ -52,6 +52,12 @@ Rate limit opcional del login:
 - `AUTH_LOGIN_RATE_LIMIT_WINDOW_MS`
 - `AUTH_LOGIN_RATE_LIMIT_LOCKOUT_MS`
 - `AUTH_LOGIN_RATE_LIMIT_MAX_FAILURES`
+- `AUTH_REQUIRE_SERVER_CUSTOM_TOKEN`
+
+Si `AUTH_REQUIRE_SERVER_CUSTOM_TOKEN=true`, el login por email falla cuando el
+backend no puede emitir el custom token de Firebase Admin. Si no se define, la
+app conserva la validacion por Turnstile y backend, pero puede continuar con
+`signInWithEmail` como fallback para no bloquear el acceso operativo.
 
 La inicializacion vive en `lib/firebase.ts`.
 

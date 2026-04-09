@@ -64,7 +64,7 @@ const getAuthErrorMessage = (error: unknown) => {
     case "server-auth/rate-limited":
       return "Se bloquearon temporalmente los intentos de acceso por exceso de intentos. Espera y vuelve a probar.";
     case "server-auth/misconfigured":
-      return "El backend de autenticacion segura no esta configurado correctamente. En local faltan credenciales de Firebase Admin para emitir el custom token.";
+      return "El backend de autenticacion segura no esta configurado correctamente. Revisa Firebase Admin o los permisos del service account de App Hosting.";
     case "server-auth/service-unavailable":
       return "El backend de autenticacion no pudo contactar a Firebase. Intenta nuevamente.";
     case "server-auth/login-failed":
