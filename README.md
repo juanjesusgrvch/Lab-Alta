@@ -1,110 +1,101 @@
-# Lab Alta
+<p align="center">
+  <img src="./app/icon.svg" width="80" height="80" alt="Lab Alta Logo" />
+</p>
 
-Base operativa en `Next.js + TypeScript` para trabajar con tres frentes:
+# Lab Alta: Sistema de Inteligencia Operativa
 
-1. `defectos`
-2. `descargas`
-3. `muestras`
+> **Base de Control Avanzada** construida sobre el ecosistema de Next.js, diseñada para la gestión cinemática de datos de laboratorio, análisis de muestras y seguridad de grado militar.
 
-## Stack
+[![Stack: Next.js](https://img.shields.io/badge/Framework-Next.js%2015-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![Auth: Firebase](https://img.shields.io/badge/Security-Firebase%20Auth-orange?style=for-the-badge&logo=firebase)](https://firebase.google.com/)
+[![Style: Tailwind](https://img.shields.io/badge/Design-Tailwind%20CSS-blue?style=for-the-badge&logo=tailwind-css)](https://tailwindcss.com/)
+[![Animation: GSAP](https://img.shields.io/badge/Motion-GSAP-green?style=for-the-badge&logo=greensock)](https://gsap.com/)
 
-- Next.js App Router
-- TypeScript
-- Firebase Authentication + Firestore
-- Recharts para graficos
-- jsPDF + html2canvas para exportacion PDF
+---
 
-## Arranque
+## 🛠️ Módulos de Operación
 
-```bash
-npm install
-npm run dev
+La plataforma se despliega en tres frentes críticos de análisis:
+
+* **🛡️ Control de Defectos:** Monitoreo y trazabilidad de fallos en procesos.
+* **📥 Gestión de Descargas:** Flujo logístico y recepción de insumos.
+* **🔬 Análisis de Muestras:** Núcleo de datos científicos y resultados de laboratorio.
+
+---
+
+## ⚡ Instalación y Arranque Rápido
+
+Sigue esta secuencia para inicializar el entorno local:
+
+1.  **Clonar el repositorio y entrar al directorio:**
+    ```bash
+    git clone [https://github.com/tu-usuario/lab-alta.git](https://github.com/tu-usuario/lab-alta.git)
+    cd lab-alta
+    ```
+
+2.  **Instalar dependencias de combate:**
+    ```bash
+    npm install
+    ```
+
+3.  **Configurar las coordenadas (Variables de Entorno):**
+    Copia el archivo de ejemplo y completa tus credenciales.
+    ```bash
+    cp .env.local.example .env.local
+    ```
+
+4.  **Iniciar el motor de desarrollo:**
+    ```bash
+    npm run dev
+    ```
+    🌐 Acceso local en: `http://localhost:3000`
+
+---
+
+## 🔐 Arquitectura de Seguridad (Zero-Trust)
+
+El sistema implementa un protocolo de seguridad híbrido para garantizar la integridad de los datos:
+
+### 1. Validación Humana (Cloudflare Turnstile)
+Cada intento de login es analizado por el widget de **Turnstile** para bloquear bots de forma invisible, manteniendo la estética fluida.
+
+### 2. Capas de Acceso (Auth Flow)
+* **Operadores Autorizados (Email/Pass):** Acceso total a la base de datos según UID y Allowlist.
+* **Usuarios Invitados (Google OAuth):** Modo "Sights-Only" (Solo lectura de UI, acceso bloqueado a Firestore vía `firestore.rules`).
+
+### 3. Blindaje de Base de Datos
+Las reglas de Firestore están configuradas para rechazar cualquier petición que no provenga de un UID autorizado, independientemente del estado de autenticación de Google.
+
+---
+
+## 📂 Estructura del Sistema
+
+```text
+.
+├── app/                # El núcleo: Layouts cinemáticos y estilos globales
+├── components/
+│   ├── auth/           # Protocolos de acceso y Turnstile
+│   ├── dashboard/      # El HUD (Heads-Up Display) principal
+│   └── modules/        # Unidades funcionales (Defectos, Muestras, Descargas)
+├── lib/                # Servicios de Firebase, Firestore y Lógica de Negocio
+├── registros/          # Almacenamiento local de datos operativos
+├── types/              # Definiciones de dominio y modelos de datos
+└── apphosting.yaml     # Configuración de despliegue en Google Cloud
 ```
+## 📋 Variables de Configuración
 
-La app queda disponible en `http://localhost:3000`.
+* **(.env)NEXT_PUBLIC_FIREBASE_:** Credenciales públicas de conexión con el SDK de Firebase.
+* **NEXT_PUBLIC_TURNSTILE_SITE_KEYClave:** pública para el widget de Cloudflare.
+* **TURNSTILE_SECRET_KEYValidación:** en servidor para el token de Turnstile.
+* **FIREBASE_ADMIN_:** Claves de acceso privado (Solo para operaciones de servidor).
 
-## Firebase
-
-Copiar `.env.local.example` a `.env.local` y completar:
-
-- `NEXT_PUBLIC_FIREBASE_API_KEY`
-- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
-- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
-- `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
-- `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
-- `NEXT_PUBLIC_FIREBASE_APP_ID`
-- `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID`
-- `NEXT_PUBLIC_TURNSTILE_SITE_KEY`
-- `TURNSTILE_SECRET_KEY`
-
-Para el login seguro por backend con `custom token`, completar ademas una de estas opciones:
-
-- Variables de service account:
-  - `FIREBASE_ADMIN_PROJECT_ID`
-  - `FIREBASE_ADMIN_CLIENT_EMAIL`
-  - `FIREBASE_ADMIN_PRIVATE_KEY`
-- O credenciales ADC disponibles en el entorno donde corre Next.js / App Hosting.
-
-Rate limit opcional del login:
-
-- `AUTH_LOGIN_RATE_LIMIT_WINDOW_MS`
-- `AUTH_LOGIN_RATE_LIMIT_LOCKOUT_MS`
-- `AUTH_LOGIN_RATE_LIMIT_MAX_FAILURES`
-- `AUTH_REQUIRE_SERVER_CUSTOM_TOKEN`
-
-Si `AUTH_REQUIRE_SERVER_CUSTOM_TOKEN=true`, el login por email falla cuando el
-backend no puede emitir el custom token de Firebase Admin. Si no se define, la
-app conserva la validacion por Turnstile y backend, pero puede continuar con
-`signInWithEmail` como fallback para no bloquear el acceso operativo.
-
-La inicializacion vive en `lib/firebase.ts`.
-
-La capa de autenticacion vive en `lib/firebase-auth.ts`.
-
-La capa base de Firestore vive en `lib/firestore-records.ts`.
-
-### Colecciones previstas
-
-- `usuarios`
-- `defectos`
-- `descargas`
-- `muestras`
-
-### Reglas base
-
-- Solo el operador inicial autorizado puede leer y escribir en `defectos`, `descargas` y `muestras`.
-- Solo el operador autorizado puede crear o actualizar su propio documento en `usuarios/{uid}`.
-- Las sesiones `google.com` entran en modo UI-only y no pueden leer ni escribir en Firestore.
-- Una cuenta autenticada pero fuera de la allowlist no entra al dashboard real y no toca Firestore.
-
-### Usuario inicial autorizado
-
-- UID habilitado: `UID: firestore.rules`
-- La allowlist local vive en `lib/access-control.ts`.
-- La restriccion de reglas vive en `firestore.rules`.
-- Para sumar los otros dos accesos, agrega sus UIDs a `allowedOperatorAccounts`.
-
-## Carpetas operativas
-
-Se agrego una estructura local para entradas manuales o importaciones:
-
-- `registros/defectos`
-- `registros/descargas`
-- `registros/muestras`
-
-## Estructura principal
-
-- `app/`: entrada de la aplicacion y estilos globales.
-- `components/auth/`: puerta de login y acceso.
-- `components/dashboard/`: shell visual del tablero.
-- `components/modules/`: modulos funcionales actuales.
-- `lib/`: Firebase, acceso a datos y utilidades.
-- `registros/`: carpetas locales para carga operativa.
-- `types/`: modelos de dominio.
-
-## Siguiente paso natural
-
-1. Habilitar Email/Password en Firebase Authentication.
-2. Crear usuarios iniciales en Firebase Console.
-3. Reemplazar progresivamente los mocks por `createRecord`, `saveRecord` y `listLatestRecords`.
-4. Definir roles y permisos mas finos si el tablero va a tener distintos perfiles.
+# 🚀 Próximos Pasos (Hoja de Ruta)[ ] 
+* [ ] **Fase 1:** Migrar todos los mocks de datos a peticiones reales de Firestore.
+* [ ] **Fase 2:** Implementar el exportador dinámico a PDF con jsPDF para reportes de muestras.
+* [ ] **Fase 3:** Refinar las animaciones de entrada de GSAP para los módulos de análisis.
+* [ ] **Fase 4:** Auditoría final de reglas de seguridad en producción.
+---
+<p align="center">
+Hecho con ❤️ para la excelencia operativa de ALTA S.A </p> 
+<p align="center"> <b>Juan Jesus Perez</b> (https://github.com/juanjesusgrvch)
+</p>
