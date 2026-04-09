@@ -43,7 +43,7 @@ export const LoginScreen = ({
   const handleTurnstileFailure = () => {
     setTurnstileToken("");
     setTurnstileError(
-      "La verificacion de seguridad expiro o fallo. Completa el desafio otra vez.",
+      "La verificacion de seguridad expiro o fallo. Recarga la página.",
     );
   };
 
@@ -59,7 +59,7 @@ export const LoginScreen = ({
 
     if (!turnstileToken) {
       setTurnstileError(
-        "Completa la verificacion de seguridad antes de intentar ingresar.",
+        "Espera. Completa la verificacion de seguridad antes de intentar ingresar.",
       );
       return;
     }

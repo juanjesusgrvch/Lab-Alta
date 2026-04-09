@@ -14,7 +14,7 @@ export const allowedOperatorAccounts: readonly AllowedOperatorAccount[] = [
     accessLevel: "full",
   },
   {
-    uid: "RTgzHx5HHiNYVlPxVGIxkXMYsK83",
+    uid: "LK8mavuONkTbURB6dMTUHc9XAcs1",
     accessLevel: "full",
   },
 ];
@@ -22,17 +22,18 @@ export const allowedOperatorAccounts: readonly AllowedOperatorAccount[] = [
 const normalizeEmail = (value: string | null | undefined) =>
   value?.trim().toLowerCase() ?? "";
 
-export const isGoogleUser = (user: User | null | undefined) =>
-  user?.providerData.some((provider) => provider.providerId === "google.com") ?? false;
+const isGoogleSession = (signInProvider?: string | null) =>
+  signInProvider === "google.com";
 
 export const getUserAccessLevel = (
   user: User | null | undefined,
+  signInProvider?: string | null,
 ): AccessLevel => {
   if (!user) {
     return "none";
   }
 
-  if (isGoogleUser(user)) {
+  if (isGoogleSession(signInProvider)) {
     return "demo";
   }
 
@@ -42,11 +43,15 @@ export const getUserAccessLevel = (
       return true;
     }
 
-    return Boolean(account.email && normalizeEmail(account.email) === normalizedEmail);
+    return Boolean(
+      account.email && normalizeEmail(account.email) === normalizedEmail,
+    );
   });
 
   return matchedAccount?.accessLevel ?? "none";
 };
 
-export const canUseLiveDashboard = (user: User | null | undefined) =>
-  getUserAccessLevel(user) === "full";
+export const canUseLiveDashboard = (
+  user: User | null | undefined,
+  signInProvider?: string | null,
+) => getUserAccessLevel(user, signInProvider) === "full";

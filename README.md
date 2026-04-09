@@ -6,8 +6,6 @@ Base operativa en `Next.js + TypeScript` para trabajar con tres frentes:
 2. `descargas`
 3. `muestras`
 
-El repositorio quedo preparado para arrancar limpio: sin caches, sin builds previos, sin logs de desarrollo y con una base de acceso por Firebase lista para extender.
-
 ## Stack
 
 - Next.js App Router
@@ -81,7 +79,7 @@ La capa base de Firestore vive en `lib/firestore-records.ts`.
 
 ### Usuario inicial autorizado
 
-- UID habilitado: `YmFkf4hqIaQsBWm1waccoIdxB7K2`
+- UID habilitado: `UID: firestore.rules`
 - La allowlist local vive en `lib/access-control.ts`.
 - La restriccion de reglas vive en `firestore.rules`.
 - Para sumar los otros dos accesos, agrega sus UIDs a `allowedOperatorAccounts`.

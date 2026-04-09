@@ -22,9 +22,8 @@ export const UnauthorizedScreen = ({
           <span className="eyebrow">Acceso restringido</span>
           <h2>La sesion existe, pero no esta habilitada para operar.</h2>
           <p>
-            El proyecto quedo preparado para un usuario inicial autorizado. Si esta
-            no es la cuenta correcta, cierra sesion e ingresa con el usuario
-            habilitado.
+            No eres usuario autorizado. Si esta no es la cuenta correcta, cierra
+            sesion e ingresa con el usuario habilitado.
           </p>
         </div>
 
@@ -41,7 +40,7 @@ export const UnauthorizedScreen = ({
 
         <p className="auth-message auth-message--error">
           {accessLevel === "none"
-            ? "Esta cuenta no integra la lista de acceso habilitada. No puede abrir el dashboard ni vincularse con Firestore."
+            ? "Esta cuenta no integra la lista de acceso habilitada."
             : "La cuenta no tiene permisos suficientes para operar."}
         </p>
 

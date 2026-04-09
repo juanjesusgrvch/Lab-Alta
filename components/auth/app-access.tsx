@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { User } from "firebase/auth";
 import { LoaderCircle } from "lucide-react";
@@ -120,39 +120,77 @@ export const AppAccess = ({ turnstileSiteKey }: AppAccessProps) => {
   const [sessionUser, setSessionUser] = useState<User | null | undefined>(
     undefined,
   );
+  const [sessionAccessLevel, setSessionAccessLevel] = useState<
+    "full" | "demo" | "none" | undefined
+  >(undefined);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [sessionWarning, setSessionWarning] = useState<string | null>(null);
+  const authResolutionIdRef = useRef(0);
 
   useEffect(() => {
     const unsubscribe = observeAuthState((nextUser) => {
+      const currentResolutionId = authResolutionIdRef.current + 1;
+      authResolutionIdRef.current = currentResolutionId;
+
       setSessionUser(nextUser);
       setIsSubmitting(false);
       setErrorMessage(null);
 
       if (!nextUser) {
+        setSessionAccessLevel("none");
         setSessionWarning(null);
         return;
       }
 
-      if (!canUseLiveDashboard(nextUser)) {
-        setSessionWarning(null);
-        return;
-      }
+      setSessionAccessLevel(undefined);
 
-      void syncSignedInUser(nextUser)
-        .then(() => {
-          setSessionWarning(null);
+      void nextUser
+        .getIdTokenResult()
+        .then((tokenResult) => {
+          if (authResolutionIdRef.current !== currentResolutionId) {
+            return;
+          }
+
+          const nextAccessLevel = getUserAccessLevel(
+            nextUser,
+            tokenResult.signInProvider,
+          );
+
+          setSessionAccessLevel(nextAccessLevel);
+
+          if (!canUseLiveDashboard(nextUser, tokenResult.signInProvider)) {
+            setSessionWarning(null);
+            return;
+          }
+
+          return syncSignedInUser(nextUser)
+            .then(() => {
+              if (authResolutionIdRef.current === currentResolutionId) {
+                setSessionWarning(null);
+              }
+            })
+            .catch(() => {
+              if (authResolutionIdRef.current === currentResolutionId) {
+                setSessionWarning(
+                  "La sesion esta activa, pero Firestore no pudo sincronizar el perfil del usuario. Revisa las credenciales del proyecto y las reglas.",
+                );
+              }
+            });
         })
         .catch(() => {
-          setSessionWarning(
-            "La sesion esta activa, pero Firestore no pudo sincronizar el perfil del usuario. Revisa las credenciales del proyecto y las reglas.",
-          );
+          if (authResolutionIdRef.current === currentResolutionId) {
+            setSessionAccessLevel(getUserAccessLevel(nextUser));
+            setSessionWarning(null);
+          }
         });
     });
 
-    return unsubscribe;
+    return () => {
+      authResolutionIdRef.current += 1;
+      unsubscribe();
+    };
   }, []);
 
   const handleEmailAccess = async (
@@ -236,7 +274,7 @@ export const AppAccess = ({ turnstileSiteKey }: AppAccessProps) => {
     });
   };
 
-  if (sessionUser === undefined) {
+  if (sessionUser === undefined || (sessionUser && sessionAccessLevel === undefined)) {
     return (
       <main className="auth-loading-screen">
         <section className="auth-loading-card card">
@@ -262,7 +300,7 @@ export const AppAccess = ({ turnstileSiteKey }: AppAccessProps) => {
     );
   }
 
-  const accessLevel = getUserAccessLevel(sessionUser);
+  const accessLevel = sessionAccessLevel ?? "none";
 
   if (accessLevel === "demo") {
     return (
