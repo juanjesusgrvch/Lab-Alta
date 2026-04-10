@@ -1,3 +1,4 @@
+// Opciones
 export const packagingTypeOptions = [
   "GRANEL",
   "BOLSA 25 KG",
@@ -12,6 +13,7 @@ export const packagingConditionOptions = [
   "VIEJO",
 ] as const;
 
+// Tipos
 export type PackagingTypeOption = (typeof packagingTypeOptions)[number];
 export type PackagingConditionOption = (typeof packagingConditionOptions)[number];
 export type PackagingMovementType = "alta" | "baja";
@@ -24,6 +26,7 @@ export interface PackagingMovementRecord {
   quantity: number;
 }
 
+// Normalizacion
 export const normalizePackagingText = (value: string) =>
   value.replace(/\s+/g, " ").trim().toUpperCase();
 
@@ -66,6 +69,7 @@ const packagingConditionLabelMap: Record<string, string> = {
   VIEJO: "viejos",
 };
 
+// Resumen
 const formatSinglePackagingSummary = (movement: PackagingMovementRecord) => {
   const typeLabel =
     packagingTypeLabelMap[movement.packagingType] ?? packagingTypeLabelMap.OTROS;

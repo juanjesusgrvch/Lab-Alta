@@ -2,6 +2,7 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Sesion
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -27,6 +28,7 @@ service cloud.firestore {
       return isAssignedOperator();
     }
 
+    // Usuarios
     match /usuarios/{userId} {
       allow read, create, update: if isAssignedOperator() && isSameUser(userId);
       allow delete: if false;
@@ -36,6 +38,7 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Operacion
     match /defectos/{document=**} {
       allow read, write: if canAccessSensitiveData();
     }
@@ -48,6 +51,7 @@ service cloud.firestore {
       allow read, write: if canAccessSensitiveData();
     }
 
+    // Bloqueo
     match /{document=**} {
       allow read, write: if false;
     }

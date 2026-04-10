@@ -5,6 +5,7 @@ import type {
   StoredSample,
 } from "@/types/domain";
 
+// Fechas
 const shiftDate = (dateValue: string, days: number) => {
   const date = new Date(`${dateValue}T12:00:00`);
   date.setDate(date.getDate() + days);
@@ -17,6 +18,7 @@ const shiftDate = (dateValue: string, days: number) => {
 const getDateStamp = (dateValue: string, hourOffset = 0) =>
   Date.parse(`${dateValue}T${String(8 + hourOffset).padStart(2, "0")}:00:00`);
 
+// Defectos
 export const createDemoDefectAnalyses = (): DefectAnalysis[] => {
   const today = getTodayInBuenosAires();
   const dateA = shiftDate(today, -18);
@@ -134,6 +136,7 @@ export const createDemoDefectAnalyses = (): DefectAnalysis[] => {
   ];
 };
 
+// Descargas
 export const createDemoNaturalEntries = (): NaturalEntry[] => {
   const today = getTodayInBuenosAires();
   const dateA = shiftDate(today, -16);
@@ -272,6 +275,7 @@ export const createDemoNaturalEntries = (): NaturalEntry[] => {
   ];
 };
 
+// Muestras
 export const createDemoSamples = (): StoredSample[] => {
   const today = getTodayInBuenosAires();
   const dateA = shiftDate(today, -22);

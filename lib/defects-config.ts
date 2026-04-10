@@ -1,3 +1,4 @@
+// Etapas
 export const outputStageOptions = [
   "CLASIFICADORA N\u00b02",
   "DENSIMETRICA",
@@ -8,6 +9,7 @@ export const outputStageOptions = [
   "ENVASADORA",
 ] as const;
 
+// Catalogo
 export const defectCatalog = [
   "MATERIAS EXTRANAS",
   "TERRON",
@@ -48,6 +50,7 @@ export const defectCatalog = [
   "OLORES OBJETABLES",
 ] as const;
 
+// Detalle
 const defectsWithDetail = new Set<string>([
   "ALERGENOS",
   "VARIEDAD CONTRASTANTE",
@@ -60,6 +63,7 @@ export const normalizeDefectText = (value: string) =>
 export const requiresDefectDetail = (name: string) =>
   defectsWithDetail.has(normalizeDefectText(name));
 
+// Formato
 export const formatDefectLabel = (name: string, detail?: string) => {
   const normalizedName = normalizeDefectText(name);
   const normalizedDetail = normalizeDefectText(detail ?? "");
@@ -75,6 +79,7 @@ export const formatDefectLabel = (name: string, detail?: string) => {
   return normalizedName;
 };
 
+// Legado
 export const parseLegacyDefectLabel = (rawName: string, rawDetail?: string) => {
   const normalizedName = normalizeDefectText(rawName);
   const normalizedDetail = normalizeDefectText(rawDetail ?? "");

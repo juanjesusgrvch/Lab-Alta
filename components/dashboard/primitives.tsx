@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { classNames } from "@/lib/format";
 
+// Secciones
 interface SectionCardProps {
   title: string;
   description?: string;
@@ -29,6 +30,7 @@ export const SectionCard = ({
   </section>
 );
 
+// Metricas
 interface MetricCardProps {
   label: string;
   value: string;
@@ -56,6 +58,7 @@ export const MetricCard = ({
   </article>
 );
 
+// Estado
 export const StatusPill = ({
   value,
   tone = "neutral",

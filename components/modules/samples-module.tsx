@@ -30,8 +30,11 @@ import {
 
 import { MetricCard, SectionCard } from "@/components/dashboard/primitives";
 import {
+  chunkPdfItems,
+  PdfExportPage,
   PdfExportPortal,
   PdfExportRoot,
+  PdfHistoryCardsSection,
   PdfSelectedFiltersSection,
   type PdfExportFilterItem,
 } from "@/components/modules/pdf-export";
@@ -61,6 +64,7 @@ import type { DashboardDataMode } from "@/lib/dashboard-data-mode";
 import { createDemoSamples } from "@/lib/demo-data";
 import type { StoredSample } from "@/types/domain";
 
+// Configuracion
 const chartColors = [
   "var(--chart-accent-5)",
   "var(--chart-accent-4)",
@@ -70,6 +74,7 @@ const chartGridColor = "var(--chart-grid)";
 const chartAxisColor = "var(--chart-axis)";
 const PAGE_SIZE = 10;
 
+// Fechas
 const isCompleteDateInput = (value: string) =>
   /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00`));
 
@@ -88,6 +93,7 @@ const addDaysToDateString = (value: string, days: number) => {
 
 const getReleaseCleanupDate = (today: string) => addDaysToDateString(today, -30);
 
+// Estado
 const isReleasedSampleExpired = (
   sample: Pick<StoredSample, "status" | "releasedAt">,
   today = getTodayInBuenosAires(),
@@ -121,6 +127,7 @@ const getSampleStatus = (
   return "Activa";
 };
 
+// Formulario
 const createEmptyForm = (): Omit<StoredSample, "id"> => {
   const today = getTodayInBuenosAires();
 
@@ -193,6 +200,7 @@ const normalizeStoredSample = (
   notes: sample.notes ?? "",
 });
 
+// Filtros
 type SampleRelationalFilters = {
   client: string;
   supplier: string;
@@ -262,6 +270,7 @@ interface SamplesModuleProps {
   dataMode?: DashboardDataMode;
 }
 
+// Modulo
 export const SamplesModule = ({
   dataMode = "live",
 }: SamplesModuleProps) => {
@@ -293,6 +302,7 @@ export const SamplesModule = ({
   const exportRef = useRef<HTMLDivElement>(null);
   const deletingReleasedIdsRef = useRef<Set<string>>(new Set());
 
+  // Sincronizacion
   useEffect(() => {
     setHasMounted(true);
   }, []);
@@ -365,6 +375,7 @@ export const SamplesModule = ({
     filters.status,
   ]);
 
+  // Filtros
   const relationalFilters: SampleRelationalFilters = {
     client: filters.client,
     supplier: filters.supplier,
@@ -491,6 +502,7 @@ export const SamplesModule = ({
     filters.status,
   ]);
 
+  // Historial
   const filteredSamples = samples.filter((sample) => {
     const matchesClient = !filters.client || sample.client === filters.client;
     const matchesSupplier =
@@ -544,6 +556,7 @@ export const SamplesModule = ({
     { label: "Proceso", value: filters.processCode },
     { label: "Estado", value: filters.status },
   ].filter((item) => item.value);
+  const pdfSamplePages = chunkPdfItems(sortedFilteredSamples);
 
   const productMap = new Map<string, { count: number; totalKg: number }>();
   const statusMap = new Map<StoredSample["status"], number>([
@@ -652,6 +665,7 @@ export const SamplesModule = ({
     });
   }, [isDemoMode, samples, today]);
 
+  // Acciones
   const openCreateModal = () => {
     setEditingSampleId(null);
     setForm(createEmptyForm());
@@ -965,6 +979,7 @@ export const SamplesModule = ({
     }
   };
 
+  // Vista
   const renderSampleRecord = (
     sample: StoredSample,
     {
@@ -1131,6 +1146,7 @@ export const SamplesModule = ({
     );
   };
 
+  // Panel
   return (
     <div className="module-stack">
       <div className="metric-grid samples-metric-grid">
@@ -1410,39 +1426,77 @@ export const SamplesModule = ({
             ref={exportRef}
             className="pdf-export-root--samples"
           >
-            <div className="metric-grid samples-metric-grid">
-              <MetricCard
-                label="Total muestras activas"
-                value={formatInteger(totalActiveSamples)}
-                tone="forest"
-              />
-              <MetricCard
-                label="Total muestras vencidas"
-                value={formatInteger(totalExpiredSamples)}
-                tone="rust"
-              />
-              <MetricCard
-                label="Proximas a vencer"
-                value={formatInteger(expiringSoon)}
-                tone="sand"
-              />
-            </div>
+            {pdfSamplePages.length ? (
+              pdfSamplePages.map((samplesPage, pageIndex) => (
+                <PdfExportPage
+                  key={`samples-pdf-page-${pageIndex}`}
+                  className={pageIndex === 0 ? "pdf-export-page--intro" : ""}
+                >
+                  {pageIndex === 0 ? (
+                    <>
+                      <div className="metric-grid samples-metric-grid">
+                        <MetricCard
+                          label="Total muestras activas"
+                          value={formatInteger(totalActiveSamples)}
+                          tone="forest"
+                        />
+                        <MetricCard
+                          label="Total muestras vencidas"
+                          value={formatInteger(totalExpiredSamples)}
+                          tone="rust"
+                        />
+                        <MetricCard
+                          label="Proximas a vencer"
+                          value={formatInteger(expiringSoon)}
+                          tone="sand"
+                        />
+                      </div>
 
-            <PdfSelectedFiltersSection items={selectedFilterItems} />
+                      <PdfSelectedFiltersSection items={selectedFilterItems} />
+                    </>
+                  ) : null}
 
-            <SectionCard
-              title="Inventario reciente"
-              className="samples-inventory-card"
-            >
-              <div className="samples-inventory-list">
-                {sortedFilteredSamples.length ? (
-                  sortedFilteredSamples.map((sample) =>
-                    renderSampleRecord(sample, {
-                      expanded: true,
-                      exportMode: true,
-                    }),
-                  )
-                ) : (
+                  <PdfHistoryCardsSection
+                    title="Inventario reciente"
+                    className="samples-inventory-card"
+                    listClassName="samples-inventory-list"
+                  >
+                    {samplesPage.map((sample) =>
+                      renderSampleRecord(sample, {
+                        expanded: true,
+                        exportMode: true,
+                      }),
+                    )}
+                  </PdfHistoryCardsSection>
+                </PdfExportPage>
+              ))
+            ) : (
+              <PdfExportPage className="pdf-export-page--intro">
+                <div className="metric-grid samples-metric-grid">
+                  <MetricCard
+                    label="Total muestras activas"
+                    value={formatInteger(totalActiveSamples)}
+                    tone="forest"
+                  />
+                  <MetricCard
+                    label="Total muestras vencidas"
+                    value={formatInteger(totalExpiredSamples)}
+                    tone="rust"
+                  />
+                  <MetricCard
+                    label="Proximas a vencer"
+                    value={formatInteger(expiringSoon)}
+                    tone="sand"
+                  />
+                </div>
+
+                <PdfSelectedFiltersSection items={selectedFilterItems} />
+
+                <PdfHistoryCardsSection
+                  title="Inventario reciente"
+                  className="samples-inventory-card"
+                  listClassName="samples-inventory-list"
+                >
                   <div className="samples-empty-state">
                     <strong>Sin resultados para esta vista</strong>
                     <p>
@@ -1450,9 +1504,9 @@ export const SamplesModule = ({
                       el inventario.
                     </p>
                   </div>
-                )}
-              </div>
-            </SectionCard>
+                </PdfHistoryCardsSection>
+              </PdfExportPage>
+            )}
           </PdfExportRoot>
         </PdfExportPortal>
       ) : null}

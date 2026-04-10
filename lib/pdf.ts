@@ -3,90 +3,120 @@
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 
-const PDF_EXPORT_WIDTH = 1120;
+// Configuracion
+const PDF_A4_WIDTH_PX = 794;
+const PDF_A4_HEIGHT_PX = 1123;
+const PDF_CAPTURE_SCALE = 1.35;
+const PDF_JPEG_QUALITY = 0.82;
 
+// Fondo
+const getPdfBackgroundColor = (element: HTMLElement) => {
+  const elementBackground = getComputedStyle(element).backgroundColor.trim();
+
+  if (elementBackground && elementBackground !== "rgba(0, 0, 0, 0)") {
+    return elementBackground;
+  }
+
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() ||
+    "#f5f8fc"
+  );
+};
+
+// Estructura
+const prepareClonedPdfLayout = (
+  clonedDocument: Document,
+  backgroundColor: string,
+) => {
+  const clonedExportRoot = clonedDocument.querySelector<HTMLElement>(
+    "[data-pdf-export='true']",
+  );
+
+  if (clonedExportRoot) {
+    clonedExportRoot.style.position = "static";
+    clonedExportRoot.style.top = "0";
+    clonedExportRoot.style.left = "0";
+    clonedExportRoot.style.width = `${PDF_A4_WIDTH_PX}px`;
+    clonedExportRoot.style.minWidth = `${PDF_A4_WIDTH_PX}px`;
+    clonedExportRoot.style.maxWidth = "none";
+    clonedExportRoot.style.visibility = "visible";
+    clonedExportRoot.style.opacity = "1";
+  }
+
+  clonedDocument
+    .querySelectorAll<HTMLElement>("[data-pdf-page='true']")
+    .forEach((page) => {
+      page.style.width = `${PDF_A4_WIDTH_PX}px`;
+      page.style.minWidth = `${PDF_A4_WIDTH_PX}px`;
+      page.style.height = `${PDF_A4_HEIGHT_PX}px`;
+      page.style.minHeight = `${PDF_A4_HEIGHT_PX}px`;
+      page.style.maxHeight = `${PDF_A4_HEIGHT_PX}px`;
+      page.style.overflow = "hidden";
+    });
+
+  clonedDocument.documentElement.style.width = `${PDF_A4_WIDTH_PX}px`;
+  clonedDocument.documentElement.style.minWidth = `${PDF_A4_WIDTH_PX}px`;
+  clonedDocument.body.style.width = `${PDF_A4_WIDTH_PX}px`;
+  clonedDocument.body.style.minWidth = `${PDF_A4_WIDTH_PX}px`;
+  clonedDocument.body.style.margin = "0";
+  clonedDocument.body.style.overflow = "hidden";
+  clonedDocument.body.style.backgroundColor = backgroundColor;
+};
+
+// Exportacion
 export const exportElementToPdf = async (
   element: HTMLElement,
   fileName: string,
 ) => {
-  const elementBackground = getComputedStyle(element).backgroundColor.trim();
-  const backgroundColor =
-    elementBackground && elementBackground !== "rgba(0, 0, 0, 0)"
-      ? elementBackground
-      : getComputedStyle(document.documentElement)
-          .getPropertyValue("--bg")
-          .trim() || "#f7fbff";
-  const exportWidth = Math.max(
-    PDF_EXPORT_WIDTH,
-    Math.ceil(element.scrollWidth),
-    Math.ceil(element.getBoundingClientRect().width),
+  const backgroundColor = getPdfBackgroundColor(element);
+  const pages = Array.from(
+    element.querySelectorAll<HTMLElement>("[data-pdf-page='true']"),
   );
-  const exportHeight = Math.max(
-    Math.ceil(element.scrollHeight),
-    Math.ceil(element.getBoundingClientRect().height),
-  );
-
-  const canvas = await html2canvas(element, {
-    scale: 2,
-    backgroundColor,
-    useCORS: true,
-    width: exportWidth,
-    height: exportHeight,
-    windowWidth: exportWidth,
-    windowHeight: exportHeight,
-    scrollX: 0,
-    scrollY: 0,
-    onclone: (clonedDocument) => {
-      const clonedExportRoot = clonedDocument.querySelector<HTMLElement>(
-        "[data-pdf-export='true']",
-      );
-
-      if (clonedExportRoot) {
-        clonedExportRoot.style.position = "static";
-        clonedExportRoot.style.top = "0";
-        clonedExportRoot.style.left = "0";
-        clonedExportRoot.style.width = `${exportWidth}px`;
-        clonedExportRoot.style.minWidth = `${exportWidth}px`;
-        clonedExportRoot.style.maxWidth = "none";
-        clonedExportRoot.style.visibility = "visible";
-        clonedExportRoot.style.opacity = "1";
-      }
-
-      clonedDocument.documentElement.style.width = `${exportWidth}px`;
-      clonedDocument.body.style.width = `${exportWidth}px`;
-      clonedDocument.body.style.margin = "0";
-      clonedDocument.body.style.backgroundColor = backgroundColor;
-    },
-  });
-
-  const imageData = canvas.toDataURL("image/png");
+  const exportPages = pages.length ? pages : [element];
   const pdf = new jsPDF({
     orientation: "portrait",
     unit: "mm",
     format: "a4",
+    compress: true,
   });
-
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const imageWidth = pageWidth;
-  const imageHeight = (canvas.height * imageWidth) / canvas.width;
 
-  let heightLeft = imageHeight;
-  let position = 0;
+  for (const [pageIndex, page] of exportPages.entries()) {
+    const canvas = await html2canvas(page, {
+      scale: PDF_CAPTURE_SCALE,
+      backgroundColor,
+      useCORS: true,
+      width: PDF_A4_WIDTH_PX,
+      height: PDF_A4_HEIGHT_PX,
+      windowWidth: PDF_A4_WIDTH_PX,
+      windowHeight: PDF_A4_HEIGHT_PX,
+      scrollX: 0,
+      scrollY: 0,
+      onclone: (clonedDocument) =>
+        prepareClonedPdfLayout(clonedDocument, backgroundColor),
+    });
 
-  pdf.addImage(imageData, "PNG", 0, position, imageWidth, imageHeight);
-  heightLeft -= pageHeight;
+    if (pageIndex > 0) {
+      pdf.addPage();
+    }
 
-  while (heightLeft > 0) {
-    position = heightLeft - imageHeight;
-    pdf.addPage();
-    pdf.addImage(imageData, "PNG", 0, position, imageWidth, imageHeight);
-    heightLeft -= pageHeight;
+    pdf.addImage(
+      canvas.toDataURL("image/jpeg", PDF_JPEG_QUALITY),
+      "JPEG",
+      0,
+      0,
+      pageWidth,
+      pageHeight,
+      undefined,
+      "FAST",
+    );
   }
 
   pdf.save(fileName);
 };
 
+// Espera
 export const waitForPdfLayout = async () =>
   new Promise<void>((resolve) => {
     if (typeof window === "undefined") {

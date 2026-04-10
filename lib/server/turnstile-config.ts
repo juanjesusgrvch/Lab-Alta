@@ -1,3 +1,4 @@
+// Configuracion
 export const DEFAULT_TURNSTILE_SITE_KEY = "0x4AAAAAAC2ONQ6ycD47hTv0";
 
 export const getTurnstileSiteKey = () =>

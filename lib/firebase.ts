@@ -13,6 +13,7 @@ import {
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
+// Configuracion
 const firebaseConfig: FirebaseOptions = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -23,6 +24,7 @@ const firebaseConfig: FirebaseOptions = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
+// Colecciones
 export const firestoreCollections = {
   defects: "defectos",
   downloads: "descargas",
@@ -38,6 +40,7 @@ export const recordsWorkspaceFolders = {
 
 export type OperationalRecordKey = keyof typeof recordsWorkspaceFolders;
 
+// Estado
 const hasExplicitFirebaseConfig = Boolean(
   firebaseConfig.apiKey &&
     firebaseConfig.authDomain &&
@@ -49,6 +52,7 @@ const hasExplicitFirebaseConfig = Boolean(
 
 export const hasFirebaseConfig = hasExplicitFirebaseConfig;
 
+// Aplicacion
 export const getFirebaseApp = (): FirebaseApp => {
   if (getApps().length) {
     return getApp();
@@ -67,6 +71,7 @@ export const getFirebaseAuth = () => getAuth(getFirebaseApp());
 
 export const getFirebaseDb = () => getFirestore(getFirebaseApp());
 
+// Analitica
 let analyticsPromise: Promise<Analytics | null> | null = null;
 
 export const getFirebaseAnalytics = async () => {

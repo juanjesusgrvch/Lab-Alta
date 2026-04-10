@@ -1,3 +1,4 @@
+// Tipos
 type LoginAttemptRecord = {
   attempts: number[];
   blockedUntil: number;
@@ -19,6 +20,7 @@ const WINDOW_MS = Number(process.env.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS ?? 10 * 60 
 const LOCKOUT_MS = Number(process.env.AUTH_LOGIN_RATE_LIMIT_LOCKOUT_MS ?? 15 * 60 * 1000);
 const MAX_FAILURES = Number(process.env.AUTH_LOGIN_RATE_LIMIT_MAX_FAILURES ?? 5);
 
+// Intentos
 const pruneRecord = (record: LoginAttemptRecord, now: number) => {
   record.attempts = record.attempts.filter((timestamp) => now - timestamp <= WINDOW_MS);
 
@@ -39,6 +41,7 @@ const getRecord = (key: string, now: number) => {
   return record;
 };
 
+// Estado
 export const getRateLimitStatus = (keys: string[]) => {
   const now = Date.now();
   const retryAfterMs = keys.reduce((maxRetryAfterMs, key) => {
@@ -52,6 +55,7 @@ export const getRateLimitStatus = (keys: string[]) => {
   };
 };
 
+// Bloqueo
 export const recordRateLimitFailure = (keys: string[]) => {
   const now = Date.now();
 
@@ -68,6 +72,7 @@ export const recordRateLimitFailure = (keys: string[]) => {
   });
 };
 
+// Limpieza
 export const clearRateLimit = (keys: string[]) => {
   keys.forEach((key) => {
     rateLimitStore.delete(key);

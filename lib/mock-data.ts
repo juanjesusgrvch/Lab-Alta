@@ -1,5 +1,6 @@
 import type { NaturalEntry, StoredSample } from "@/types/domain";
 
+// Descargas
 export const initialNaturalEntries: NaturalEntry[] = [
   {
     id: "ING-5001",
@@ -124,6 +125,7 @@ export const initialNaturalEntries: NaturalEntry[] = [
   },
 ];
 
+// Muestras
 export const initialStoredSamples: StoredSample[] = [
   {
     id: "SMP-9001",

@@ -6,6 +6,7 @@ import { LockKeyhole } from "lucide-react";
 
 import { Turnstile } from "@/components/auth/turnstile";
 
+// Tipos
 interface LoginScreenProps {
   isSubmitting: boolean;
   errorMessage: string | null;
@@ -20,6 +21,7 @@ interface LoginScreenProps {
   onPasswordReset: (email: string) => Promise<void>;
 }
 
+// Ingreso
 export const LoginScreen = ({
   isSubmitting,
   errorMessage,
@@ -35,6 +37,7 @@ export const LoginScreen = ({
   const [turnstileError, setTurnstileError] = useState<string | null>(null);
   const [turnstileRenderKey, setTurnstileRenderKey] = useState(0);
 
+  // Turnstile
   const resetTurnstileChallenge = () => {
     setTurnstileToken("");
     setTurnstileRenderKey((current) => current + 1);
@@ -47,6 +50,7 @@ export const LoginScreen = ({
     );
   };
 
+  // Acceso
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -73,6 +77,7 @@ export const LoginScreen = ({
     }
   };
 
+  // Vista
   return (
     <main className="auth-screen">
       <div className="auth-shell auth-shell--single">

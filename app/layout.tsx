@@ -3,6 +3,7 @@ import { Inter, Manrope } from "next/font/google";
 
 import "./globals.css";
 
+// Fuentes
 const headingFont = Manrope({
   subsets: ["latin"],
   variable: "--font-heading",
@@ -19,6 +20,7 @@ export const metadata: Metadata = {
     "Control operativo con login Firebase para defectos, descargas y muestras.",
 };
 
+// Estructura
 export default function RootLayout({
   children,
 }: Readonly<{

@@ -2,6 +2,7 @@
 
 import { Ban, ShieldCheck } from "lucide-react";
 
+// Tipos
 interface UnauthorizedScreenProps {
   sessionEmail?: string | null;
   sessionUid: string;
@@ -9,6 +10,7 @@ interface UnauthorizedScreenProps {
   onSignOut: () => void;
 }
 
+// Acceso
 export const UnauthorizedScreen = ({
   sessionEmail,
   sessionUid,

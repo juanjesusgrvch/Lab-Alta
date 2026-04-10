@@ -1,3 +1,4 @@
+// Fechas
 export const formatDate = (value: string) =>
   new Intl.DateTimeFormat("es-AR", {
     day: "2-digit",
@@ -5,6 +6,7 @@ export const formatDate = (value: string) =>
     year: "numeric",
   }).format(new Date(`${value}T00:00:00`));
 
+// Numeros
 export const formatInteger = (value: number) =>
   new Intl.NumberFormat("es-AR", {
     maximumFractionDigits: 0,
@@ -37,5 +39,6 @@ export const getTodayInBuenosAires = () =>
     timeZone: "America/Buenos_Aires",
   }).format(new Date());
 
+// Clases
 export const classNames = (...parts: Array<string | false | null | undefined>) =>
   parts.filter(Boolean).join(" ");

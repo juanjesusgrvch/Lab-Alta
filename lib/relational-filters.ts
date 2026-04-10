@@ -1,3 +1,4 @@
+// Tipos
 export type RelationalFieldConfig<T> = {
   getValues: (item: T) => string[];
   matches: (item: T, value: string) => boolean;
@@ -11,6 +12,7 @@ const uniqueSorted = (values: string[]) =>
     new Set(values.map((value) => value.trim()).filter(Boolean)),
   ).sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" }));
 
+// Opciones
 export const getRelationalOptions = <T, K extends string>(
   items: T[],
   filters: Record<K, string>,
@@ -40,6 +42,7 @@ export const getRelationalOptions = <T, K extends string>(
   );
 };
 
+// Limpieza
 export const clearInvalidRelationalSelections = <T, K extends string>(
   items: T[],
   filters: Record<K, string>,
@@ -73,6 +76,7 @@ export const clearInvalidRelationalSelections = <T, K extends string>(
   return hasChanges ? nextFilters : filters;
 };
 
+// Autocompletado
 export const autofillUniqueRelationalSelections = <T, K extends string>(
   items: T[],
   filters: Record<K, string>,
@@ -116,6 +120,7 @@ export const autofillUniqueRelationalSelections = <T, K extends string>(
   return hasChanges ? nextFilters : filters;
 };
 
+// Comparacion
 export const areStringFiltersEqual = <T extends Record<string, string>>(
   left: T,
   right: T,

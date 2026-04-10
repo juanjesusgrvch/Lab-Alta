@@ -17,11 +17,13 @@ import {
   type OperationalRecordKey,
 } from "@/lib/firebase";
 
+// Tipos
 export interface StoredFirestoreRecord<TPayload extends DocumentData> {
   id: string;
   data: TPayload;
 }
 
+// Colecciones
 const getOperationalCollectionName = (bucket: OperationalRecordKey) =>
   firestoreCollections[bucket];
 
@@ -29,6 +31,7 @@ export const getOperationalCollection = <TPayload extends DocumentData>(
   bucket: OperationalRecordKey,
 ) => collection(getFirebaseDb(), getOperationalCollectionName(bucket));
 
+// Lectura
 export const subscribeToRecords = <TPayload extends DocumentData>(
   bucket: OperationalRecordKey,
   onNext: (records: StoredFirestoreRecord<TPayload>[]) => void,
@@ -61,6 +64,7 @@ export const listLatestRecords = async <TPayload extends DocumentData>(
   })).slice(0, size);
 };
 
+// Escritura
 export const createRecord = async <TPayload extends DocumentData>(
   bucket: OperationalRecordKey,
   recordId: string,
@@ -101,6 +105,7 @@ export const saveRecord = async <TPayload extends DocumentData>(
 export const deleteRecord = (bucket: OperationalRecordKey, recordId: string) =>
   deleteDoc(doc(getOperationalCollection(bucket), recordId));
 
+// Usuario
 export const syncSignedInUser = async (user: User) =>
   setDoc(
     doc(getFirebaseDb(), firestoreCollections.users, user.uid),

@@ -1,6 +1,8 @@
+// Configuracion
 const turnstileVerifyUrl =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
+// Verificacion
 export const verifyTurnstileToken = async ({
   token,
   remoteIp,

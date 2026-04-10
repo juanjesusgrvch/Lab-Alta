@@ -1,5 +1,7 @@
+// Navegacion
 export type DashboardTab = "defects" | "natural" | "samples";
 
+// Defectos
 export interface DefectItem {
   id: string;
   name: string;
@@ -25,6 +27,7 @@ export interface DefectAnalysis {
   updatedAtMs?: number;
 }
 
+// Descargas
 export interface NaturalAnalysisSummary {
   humidityPct: number;
   brokenPct: number;
@@ -58,6 +61,7 @@ export interface NaturalEntry {
   analysisSummary?: NaturalAnalysisSummary;
 }
 
+// Muestras
 export interface StoredSample {
   id: string;
   storedAt: string;

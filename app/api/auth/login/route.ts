@@ -8,12 +8,14 @@ import {
 } from "@/lib/server/login-rate-limit";
 import { verifyTurnstileToken } from "@/lib/server/turnstile";
 
+// Configuracion
 const identityToolkitUrl =
   "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword";
 const requireServerCustomToken =
   process.env.AUTH_REQUIRE_SERVER_CUSTOM_TOKEN?.trim() === "true";
 const allowClientPasswordFallback = !requireServerCustomToken;
 
+// Seguridad
 const getClientIp = (request: Request) =>
   request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "";
 
@@ -22,6 +24,7 @@ const getRateLimitKeys = (email: string, ipAddress: string) => [
   `email:${email.trim().toLowerCase()}`,
 ];
 
+// Errores
 const mapIdentityToolkitError = (message: string) => {
   switch (message) {
     case "INVALID_PASSWORD":
@@ -43,6 +46,7 @@ const mapIdentityToolkitError = (message: string) => {
   }
 };
 
+// Acceso
 export async function POST(request: Request) {
   const firebaseApiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY?.trim();
 

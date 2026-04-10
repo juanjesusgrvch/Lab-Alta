@@ -11,6 +11,7 @@ import type { DashboardTab } from "@/types/domain";
 
 gsap.registerPlugin(useGSAP);
 
+// Tipos
 export interface DashboardHeaderTab {
   id: DashboardTab;
   label: string;
@@ -28,6 +29,7 @@ interface DashboardHeaderProps {
   onSignOut: () => void;
 }
 
+// Sesion
 const getSessionInitials = (value: string) => {
   const initials = value
     .split(/[\s@._-]+/)
@@ -39,6 +41,7 @@ const getSessionInitials = (value: string) => {
   return initials || "AL";
 };
 
+// Cabecera
 export const DashboardHeader = ({
   activeTab,
   tabs,
@@ -57,6 +60,8 @@ export const DashboardHeader = ({
   );
   const ThemeIcon = themeMode === "dark" ? SunMedium : Moon;
   const sessionInitials = getSessionInitials(sessionLabel);
+
+  // Acciones
   const renderSessionActions = ({
     className,
     includeAvatar,
@@ -106,6 +111,7 @@ export const DashboardHeader = ({
     </div>
   );
 
+  // Animacion
   useGSAP(
     () => {
       const media = gsap.matchMedia();
@@ -174,6 +180,7 @@ export const DashboardHeader = ({
     },
   );
 
+  // Vista
   return (
     <header ref={containerRef} className="dashboard-console">
       <div className="dashboard-console__topbar dashboard-console__fade">

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import Script from "next/script";
 
+// Tipos
 type TurnstileWidgetId = string;
 
 type TurnstileApi = {
@@ -34,6 +35,7 @@ interface TurnstileProps {
   onError?: () => void;
 }
 
+// Widget
 export const Turnstile = ({
   siteKey,
   className,
@@ -48,6 +50,7 @@ export const Turnstile = ({
   const onErrorRef = useRef(onError);
   const [isScriptReady, setIsScriptReady] = useState(false);
 
+  // Eventos
   useEffect(() => {
     onVerifyRef.current = onVerify;
     onExpireRef.current = onExpire;
@@ -85,6 +88,7 @@ export const Turnstile = ({
     };
   }, [isScriptReady, siteKey]);
 
+  // Vista
   return (
     <>
       <Script

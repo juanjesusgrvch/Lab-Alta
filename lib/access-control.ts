@@ -1,5 +1,6 @@
 import type { User } from "firebase/auth";
 
+// Tipos
 export type AccessLevel = "full" | "demo" | "none";
 
 interface AllowedOperatorAccount {
@@ -8,6 +9,7 @@ interface AllowedOperatorAccount {
   accessLevel: Exclude<AccessLevel, "none">;
 }
 
+// Cuentas
 export const allowedOperatorAccounts: readonly AllowedOperatorAccount[] = [
   {
     uid: "YmFkf4hqIaQsBWm1waccoIdxB7K2",
@@ -25,6 +27,7 @@ const normalizeEmail = (value: string | null | undefined) =>
 const isGoogleSession = (signInProvider?: string | null) =>
   signInProvider === "google.com";
 
+// Acceso
 export const getUserAccessLevel = (
   user: User | null | undefined,
   signInProvider?: string | null,

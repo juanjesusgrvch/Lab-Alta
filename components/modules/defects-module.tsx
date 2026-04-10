@@ -28,8 +28,11 @@ import {
 
 import { MetricCard, SectionCard } from "@/components/dashboard/primitives";
 import {
+  chunkPdfItems,
+  PdfExportPage,
   PdfExportPortal,
   PdfExportRoot,
+  PdfHistoryCardsSection,
   PdfSelectedFiltersSection,
   type PdfExportFilterItem,
 } from "@/components/modules/pdf-export";
@@ -69,6 +72,7 @@ import type { DashboardDataMode } from "@/lib/dashboard-data-mode";
 import { createDemoDefectAnalyses } from "@/lib/demo-data";
 import type { DefectAnalysis, DefectItem } from "@/types/domain";
 
+// Configuracion
 const chartColors = [
   "var(--chart-accent-1)",
   "var(--chart-accent-2)",
@@ -80,6 +84,7 @@ const chartGridColor = "var(--chart-grid)";
 const chartAxisColor = "var(--chart-axis)";
 const PAGE_SIZE = 8;
 
+// Tipos
 type TimestampLike = {
   toMillis: () => number;
 };
@@ -133,6 +138,7 @@ type EvolutionPoint = {
   grams: number;
 };
 
+// Filtros
 const defectFilterConfig: Record<
   keyof DefectRelationalFilters,
   RelationalFieldConfig<DefectAnalysis>
@@ -165,6 +171,7 @@ const defectFilterConfig: Record<
   },
 };
 
+// Formulario
 const normalizeUppercaseValue = (value: string) =>
   value.replace(/\s+/g, " ").replace(/^\s+/, "").toUpperCase();
 
@@ -248,6 +255,7 @@ const getTimestampMs = (value: unknown) => {
   return undefined;
 };
 
+// Registros
 const normalizeDefectItems = (value: unknown): DefectItem[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -350,6 +358,7 @@ const sortAnalysesByRecency = (left: DefectAnalysis, right: DefectAnalysis) => {
   return right.id.localeCompare(left.id);
 };
 
+// Meses
 const getMonthKey = (dateValue: string) => dateValue.slice(0, 7);
 
 const parseMonthKey = (monthKey: string) => {
@@ -423,6 +432,7 @@ const getDefectPercentage = (grams: number, sampleWeightGr: number) =>
 const buildRecordId = (analysisDate: string) =>
   `DEF-${analysisDate.replaceAll("-", "")}-${Date.now()}`;
 
+// Validacion
 const buildProcessMismatchWarning = (
   analyses: DefectAnalysis[],
   client: string,
@@ -471,6 +481,7 @@ interface DefectsModuleProps {
   dataMode?: DashboardDataMode;
 }
 
+// Modulo
 export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   const isDemoMode = dataMode === "demo";
   const [analyses, setAnalyses] = useState<DefectAnalysis[]>(() =>
@@ -510,6 +521,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   );
   const exportRef = useRef<HTMLDivElement>(null);
 
+  // Sincronizacion
   useEffect(() => {
     setHasMounted(true);
   }, []);
@@ -580,6 +592,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     filters.to,
   ]);
 
+  // Filtros
   const relationalFilters: DefectRelationalFilters = {
     client: filters.client,
     supplier: filters.supplier,
@@ -675,6 +688,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     filters.to,
   ]);
 
+  // Historial
   const filteredAnalyses = analyses.filter((analysis) => {
     const matchesClient = !filters.client || analysis.client === filters.client;
     const matchesSupplier =
@@ -722,6 +736,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     }
   }, [currentPage, totalPages]);
 
+  // Graficos
   const totalSampleGr = filteredAnalyses.reduce(
     (sum, analysis) => sum + analysis.sampleWeightGr,
     0,
@@ -756,6 +771,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     { label: "Desde", value: filters.from ? formatDate(filters.from) : "" },
     { label: "Hasta", value: filters.to ? formatDate(filters.to) : "" },
   ].filter((item) => item.value);
+  const pdfAnalysisPages = chunkPdfItems(sortedFilteredAnalyses);
   const totalDefectGrams = filteredAnalyses.reduce(
     (sum, analysis) =>
       sum +
@@ -1028,6 +1044,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     formOutputOptions,
   ]);
 
+  // Acciones
   const openCreateModal = () => {
     setEditingAnalysisId(null);
     setForm(createEmptyForm());
@@ -1299,6 +1316,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     }
   };
 
+  // Vista
   const renderAnalysisRecord = (
     analysis: DefectAnalysis,
     {
@@ -1464,6 +1482,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   const liveSampleWeight =
     Math.max(0, toNumberOrZero(form.sampleWeightGr || 300)) || 300;
 
+  // Panel
   return (
     <div className="module-stack">
       <div className="metric-grid samples-metric-grid">
@@ -2008,36 +2027,75 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
       {isPreparingPdf ? (
         <PdfExportPortal>
           <PdfExportRoot ref={exportRef} className="pdf-export-root--defects">
-            <div className="metric-grid samples-metric-grid">
-              <MetricCard
-                label="Cantidad de analisis"
-                value={formatInteger(filteredAnalyses.length)}
-                tone="sand"
-              />
-              <MetricCard
-                label="Gr analizados"
-                value={formatGrams(totalSampleGr)}
-                tone="olive"
-              />
-              <MetricCard
-                label="Gramaje promedio"
-                value={formatHundredths(averageGramajeHundredths)}
-                tone="forest"
-              />
-            </div>
+            {pdfAnalysisPages.length ? (
+              pdfAnalysisPages.map((analysesPage, pageIndex) => (
+                <PdfExportPage
+                  key={`defects-pdf-page-${pageIndex}`}
+                  className={pageIndex === 0 ? "pdf-export-page--intro" : ""}
+                >
+                  {pageIndex === 0 ? (
+                    <>
+                      <div className="metric-grid samples-metric-grid">
+                        <MetricCard
+                          label="Cantidad de analisis"
+                          value={formatInteger(filteredAnalyses.length)}
+                          tone="sand"
+                        />
+                        <MetricCard
+                          label="Gr analizados"
+                          value={formatGrams(totalSampleGr)}
+                          tone="olive"
+                        />
+                        <MetricCard
+                          label="Gramaje promedio"
+                          value={formatHundredths(averageGramajeHundredths)}
+                          tone="forest"
+                        />
+                      </div>
 
-            <PdfSelectedFiltersSection items={selectedFilterItems} />
+                      <PdfSelectedFiltersSection items={selectedFilterItems} />
+                    </>
+                  ) : null}
 
-            <SectionCard title="Historial de analisis">
-              <div className="defects-history-list">
-                {sortedFilteredAnalyses.length ? (
-                  sortedFilteredAnalyses.map((analysis) =>
-                    renderAnalysisRecord(analysis, {
-                      expanded: true,
-                      exportMode: true,
-                    }),
-                  )
-                ) : (
+                  <PdfHistoryCardsSection
+                    title="Historial de analisis"
+                    listClassName="defects-history-list"
+                  >
+                    {analysesPage.map((analysis) =>
+                      renderAnalysisRecord(analysis, {
+                        expanded: true,
+                        exportMode: true,
+                      }),
+                    )}
+                  </PdfHistoryCardsSection>
+                </PdfExportPage>
+              ))
+            ) : (
+              <PdfExportPage className="pdf-export-page--intro">
+                <div className="metric-grid samples-metric-grid">
+                  <MetricCard
+                    label="Cantidad de analisis"
+                    value={formatInteger(filteredAnalyses.length)}
+                    tone="sand"
+                  />
+                  <MetricCard
+                    label="Gr analizados"
+                    value={formatGrams(totalSampleGr)}
+                    tone="olive"
+                  />
+                  <MetricCard
+                    label="Gramaje promedio"
+                    value={formatHundredths(averageGramajeHundredths)}
+                    tone="forest"
+                  />
+                </div>
+
+                <PdfSelectedFiltersSection items={selectedFilterItems} />
+
+                <PdfHistoryCardsSection
+                  title="Historial de analisis"
+                  listClassName="defects-history-list"
+                >
                   <div className="samples-empty-state">
                     <strong>No hay analisis para esta vista</strong>
                     <p>
@@ -2045,9 +2103,9 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
                       modal.
                     </p>
                   </div>
-                )}
-              </div>
-            </SectionCard>
+                </PdfHistoryCardsSection>
+              </PdfExportPage>
+            )}
           </PdfExportRoot>
         </PdfExportPortal>
       ) : null}

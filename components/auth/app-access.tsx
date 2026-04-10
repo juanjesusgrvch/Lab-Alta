@@ -19,6 +19,7 @@ import {
 } from "@/lib/firebase-auth";
 import { syncSignedInUser } from "@/lib/firestore-records";
 
+// Errores
 const createAppError = (code: string) =>
   Object.assign(new Error(code), { code });
 
@@ -74,6 +75,7 @@ const getAuthErrorMessage = (error: unknown) => {
   }
 };
 
+// Ingreso seguro
 const requestSecureEmailLogin = async (
   email: string,
   password: string,
@@ -116,6 +118,7 @@ interface AppAccessProps {
   turnstileSiteKey: string;
 }
 
+// Acceso
 export const AppAccess = ({ turnstileSiteKey }: AppAccessProps) => {
   const [sessionUser, setSessionUser] = useState<User | null | undefined>(
     undefined,
@@ -129,6 +132,7 @@ export const AppAccess = ({ turnstileSiteKey }: AppAccessProps) => {
   const [sessionWarning, setSessionWarning] = useState<string | null>(null);
   const authResolutionIdRef = useRef(0);
 
+  // Sesion
   useEffect(() => {
     const unsubscribe = observeAuthState((nextUser) => {
       const currentResolutionId = authResolutionIdRef.current + 1;
@@ -193,6 +197,7 @@ export const AppAccess = ({ turnstileSiteKey }: AppAccessProps) => {
     };
   }, []);
 
+  // Acciones
   const handleEmailAccess = async (
     email: string,
     password: string,
@@ -274,6 +279,7 @@ export const AppAccess = ({ turnstileSiteKey }: AppAccessProps) => {
     });
   };
 
+  // Vista
   if (sessionUser === undefined || (sessionUser && sessionAccessLevel === undefined)) {
     return (
       <main className="auth-loading-screen">

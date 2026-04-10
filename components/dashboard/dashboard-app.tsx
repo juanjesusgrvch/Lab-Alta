@@ -19,6 +19,7 @@ import type { DashboardTab } from "@/types/domain";
 
 gsap.registerPlugin(useGSAP);
 
+// Modulos
 const tabs: DashboardHeaderTab[] = [
   {
     id: "defects",
@@ -45,6 +46,7 @@ interface DashboardAppProps {
   onSignOut: () => void;
 }
 
+// Tablero
 export const DashboardApp = ({
   sessionName,
   sessionEmail,
@@ -68,6 +70,7 @@ export const DashboardApp = ({
     void getFirebaseAnalytics();
   }, []);
 
+  // Tema
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -89,6 +92,7 @@ export const DashboardApp = ({
     window.localStorage.setItem("lab-alta-ui-theme", themeMode);
   }, [themeMode]);
 
+  // Transicion
   useGSAP(
     () => {
       const currentPanel = previousTab ? panelsRef.current[previousTab] : null;
@@ -199,6 +203,7 @@ export const DashboardApp = ({
     },
   );
 
+  // Acciones
   const handleTabChange = (nextTab: DashboardTab) => {
     if (nextTab === activeTab || isSwitching) {
       return;
@@ -221,6 +226,7 @@ export const DashboardApp = ({
   const sessionLabel =
     sessionName?.trim() || sessionEmail?.trim() || "Sesion Firebase activa";
 
+  // Vista
   return (
     <main
       className={classNames(

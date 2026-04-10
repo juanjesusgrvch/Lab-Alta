@@ -8,6 +8,7 @@ import {
 } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 
+// Credenciales
 const getServiceAccountConfig = () => {
   const projectId =
     process.env.FIREBASE_ADMIN_PROJECT_ID?.trim() ??
@@ -27,6 +28,7 @@ const getServiceAccountConfig = () => {
   };
 };
 
+// Diagnostico
 export const getAdminCredentialDiagnostic = () => {
   const serviceAccountConfig = getServiceAccountConfig();
   const adcPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim() ?? "";
@@ -52,6 +54,7 @@ export const getAdminCredentialDiagnostic = () => {
   };
 };
 
+// Servidor
 export const getAdminApp = (): App => {
   const existingApp = getApps()[0];
 

@@ -29,8 +29,11 @@ import {
 
 import { MetricCard, SectionCard } from "@/components/dashboard/primitives";
 import {
+  chunkPdfItems,
+  PdfExportPage,
   PdfExportPortal,
   PdfExportRoot,
+  PdfHistoryCardsSection,
   PdfSelectedFiltersSection,
   type PdfExportFilterItem,
 } from "@/components/modules/pdf-export";
@@ -69,6 +72,7 @@ import type { DashboardDataMode } from "@/lib/dashboard-data-mode";
 import { createDemoNaturalEntries } from "@/lib/demo-data";
 import type { NaturalEntry, PackagingMovement } from "@/types/domain";
 
+// Configuracion
 const chartColors = [
   "var(--chart-accent-1)",
   "var(--chart-accent-2)",
@@ -79,6 +83,7 @@ const chartGridColor = "var(--chart-grid)";
 const chartAxisColor = "var(--chart-axis)";
 const PAGE_SIZE = 5;
 
+// Tipos
 type NaturalFormState = {
   entryDate: string;
   client: string;
@@ -110,6 +115,7 @@ type MonthlyScatterPoint = {
   loads: number[];
 };
 
+// Filtros
 const naturalFilterConfig: Record<
   keyof NaturalRelationalFilters,
   RelationalFieldConfig<NaturalEntry>
@@ -158,6 +164,7 @@ const naturalFormRelationConfig: Record<
   },
 };
 
+// Formulario
 const normalizeUppercaseValue = (value: string) =>
   value.replace(/\s+/g, " ").replace(/^\s+/, "").toUpperCase();
 
@@ -194,6 +201,7 @@ const formFromEntry = (entry: NaturalEntry): NaturalFormState => ({
     : [createPackagingMovement("alta")],
 });
 
+// Meses
 const getMonthKey = (value: string) => value.slice(0, 7);
 
 const parseMonthKey = (monthKey: string) => {
@@ -268,6 +276,7 @@ const getDayTicks = (daysInMonth: number) => {
 const formatChartKg = (value: number) =>
   value >= 1000 ? `${Math.round(value / 1000)}k` : `${value}`;
 
+// Registros
 const normalizeNaturalEntry = (
   recordId: string,
   entry: Partial<NaturalEntry>,
@@ -301,6 +310,7 @@ const getLatestMonthKey = (entries: NaturalEntry[]) =>
     ),
   );
 
+// Graficos
 const NaturalScatterTooltip = ({
   active,
   payload,
@@ -335,6 +345,7 @@ interface NaturalModuleProps {
   dataMode?: DashboardDataMode;
 }
 
+// Modulo
 export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   const isDemoMode = dataMode === "demo";
   const [entries, setEntries] = useState<NaturalEntry[]>(() =>
@@ -364,6 +375,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
+  // Sincronizacion
   useEffect(() => {
     setHasMounted(true);
   }, []);
@@ -431,6 +443,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     filters.onlyWithAnalysis,
   ]);
 
+  // Filtros
   const relationalFilters: NaturalRelationalFilters = {
     client: filters.client,
     supplier: filters.supplier,
@@ -559,6 +572,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     filters.onlyWithAnalysis,
   ]);
 
+  // Historial
   const filteredEntries = entries.filter((entry) => {
     const matchesClient = !filters.client || entry.client === filters.client;
     const matchesSupplier =
@@ -616,6 +630,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       ? [{ label: "Analisis", value: "Solo con analisis" }]
       : []),
   ].filter((item) => item.value);
+  const pdfEntryPages = chunkPdfItems(sortedEntries);
 
   const inboundByProductMap = new Map<string, number>();
   filteredEntries.forEach((entry) => {
@@ -678,6 +693,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     }
   }, [currentPage, totalPages]);
 
+  // Acciones
   const openCreateModal = () => {
     setEditingEntryId(null);
     setForm(createEmptyForm());
@@ -782,7 +798,8 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
 
         if (field === "packagingType") {
           const newPackagingType = normalizePackagingText(String(value));
-          // Si el tipo de envase es GRANEL, limpiar condición y cantidad
+
+          // Envase granel
           if (newPackagingType === "GRANEL") {
             return {
               ...movement,
@@ -1124,6 +1141,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     </article>
   );
 
+  // Vista
   return (
     <div className="module-stack">
       <div className="metric-grid samples-metric-grid">
@@ -1452,36 +1470,75 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
             ref={exportRef}
             className="pdf-export-root--natural"
           >
-            <div className="metric-grid samples-metric-grid">
-              <MetricCard
-                label="Registro de descargas"
-                value={formatInteger(filteredEntries.length)}
-                tone="sand"
-              />
-              <MetricCard
-                label="Stock en planta"
-                value={formatKg(totalNetKg)}
-                tone="olive"
-              />
-              <MetricCard
-                label="Analisis realizados"
-                value={formatInteger(analyzedEntries)}
-                tone="forest"
-              />
-            </div>
+            {pdfEntryPages.length ? (
+              pdfEntryPages.map((entriesPage, pageIndex) => (
+                <PdfExportPage
+                  key={`natural-pdf-page-${pageIndex}`}
+                  className={pageIndex === 0 ? "pdf-export-page--intro" : ""}
+                >
+                  {pageIndex === 0 ? (
+                    <>
+                      <div className="metric-grid samples-metric-grid">
+                        <MetricCard
+                          label="Registro de descargas"
+                          value={formatInteger(filteredEntries.length)}
+                          tone="sand"
+                        />
+                        <MetricCard
+                          label="Stock en planta"
+                          value={formatKg(totalNetKg)}
+                          tone="olive"
+                        />
+                        <MetricCard
+                          label="Analisis realizados"
+                          value={formatInteger(analyzedEntries)}
+                          tone="forest"
+                        />
+                      </div>
 
-            <PdfSelectedFiltersSection items={selectedFilterItems} />
+                      <PdfSelectedFiltersSection items={selectedFilterItems} />
+                    </>
+                  ) : null}
 
-            <SectionCard title="Registro de descargas">
-              <div className="samples-inventory-list">
-                {sortedEntries.length ? (
-                  sortedEntries.map((entry) =>
-                    renderEntryRecord(entry, {
-                      expanded: true,
-                      exportMode: true,
-                    }),
-                  )
-                ) : (
+                  <PdfHistoryCardsSection
+                    title="Registro de descargas"
+                    listClassName="samples-inventory-list"
+                  >
+                    {entriesPage.map((entry) =>
+                      renderEntryRecord(entry, {
+                        expanded: true,
+                        exportMode: true,
+                      }),
+                    )}
+                  </PdfHistoryCardsSection>
+                </PdfExportPage>
+              ))
+            ) : (
+              <PdfExportPage className="pdf-export-page--intro">
+                <div className="metric-grid samples-metric-grid">
+                  <MetricCard
+                    label="Registro de descargas"
+                    value={formatInteger(filteredEntries.length)}
+                    tone="sand"
+                  />
+                  <MetricCard
+                    label="Stock en planta"
+                    value={formatKg(totalNetKg)}
+                    tone="olive"
+                  />
+                  <MetricCard
+                    label="Analisis realizados"
+                    value={formatInteger(analyzedEntries)}
+                    tone="forest"
+                  />
+                </div>
+
+                <PdfSelectedFiltersSection items={selectedFilterItems} />
+
+                <PdfHistoryCardsSection
+                  title="Registro de descargas"
+                  listClassName="samples-inventory-list"
+                >
                   <div className="samples-empty-state">
                     <strong>Sin descargas para esta vista</strong>
                     <p>
@@ -1489,9 +1546,9 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                       modal.
                     </p>
                   </div>
-                )}
-              </div>
-            </SectionCard>
+                </PdfHistoryCardsSection>
+              </PdfExportPage>
+            )}
           </PdfExportRoot>
         </PdfExportPortal>
       ) : null}
