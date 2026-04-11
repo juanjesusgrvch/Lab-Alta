@@ -832,7 +832,7 @@ export const SamplesModule = ({
       shelf: "Sin asignar",
       gramajeHundredths: normalizedGramaje,
       status: preservedStatus,
-      releasedAt: preservedReleasedAt,
+      releasedAt: preservedReleasedAt ?? null,
     };
 
     setIsPersisting(true);
@@ -867,7 +867,8 @@ export const SamplesModule = ({
       setForm(createEmptyForm());
       setIsRetentionPreset(true);
       closeCreateModal();
-    } catch {
+    } catch (error) {
+      console.error("Error al guardar muestra almacenada", error);
       setSyncError("No se pudo guardar la muestra en Firestore.");
     } finally {
       setIsPersisting(false);

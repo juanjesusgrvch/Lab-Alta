@@ -52,14 +52,16 @@ import {
 } from "@/lib/firestore-records";
 import { exportElementToPdf, waitForPdfLayout } from "@/lib/pdf";
 import {
+  createBulkPackagingMovement,
   createPackagingMovement,
-  formatPackagingSummary,
+  formatPackagingMovementLabel,
+  getPackagingIdsFromMovements,
+  hasExplicitPackagingDetails,
   normalizePackagingMovement,
   normalizePackagingText,
   packagingConditionOptions,
   packagingTypeOptions,
   type PackagingMovementRecord,
-  type PackagingMovementType,
 } from "@/lib/packaging";
 import {
   autofillUniqueRelationalSelections,
@@ -70,7 +72,7 @@ import {
 } from "@/lib/relational-filters";
 import type { DashboardDataMode } from "@/lib/dashboard-data-mode";
 import { createDemoNaturalEntries } from "@/lib/demo-data";
-import type { NaturalEntry, PackagingMovement } from "@/types/domain";
+import type { NaturalEntry } from "@/types/domain";
 
 // Configuracion
 const chartColors = [
@@ -94,6 +96,7 @@ type NaturalFormState = {
   withAnalysis: boolean;
   analysisCode: string;
   observations: string;
+  hasPackagingDetails: boolean;
   packagingMovements: PackagingMovementRecord[];
 };
 
@@ -102,6 +105,7 @@ type NaturalRelationalFilters = {
   supplier: string;
   product: string;
   processCode: string;
+  packagingId: string;
 };
 
 type NaturalFormRelations = Pick<
@@ -135,6 +139,11 @@ const naturalFilterConfig: Record<
   processCode: {
     getValues: (entry) => [entry.processCode],
     matches: (entry, value) => entry.processCode === value,
+  },
+  packagingId: {
+    getValues: (entry) => getPackagingIdsFromMovements(entry.packagingMovements),
+    matches: (entry, value) =>
+      getPackagingIdsFromMovements(entry.packagingMovements).includes(value),
   },
 };
 
@@ -178,10 +187,16 @@ const createEmptyForm = (): NaturalFormState => ({
   withAnalysis: false,
   analysisCode: "",
   observations: "",
+  hasPackagingDetails: false,
   packagingMovements: [createPackagingMovement("alta")],
 });
 
-const formFromEntry = (entry: NaturalEntry): NaturalFormState => ({
+const formFromEntry = (entry: NaturalEntry): NaturalFormState => {
+  const hasPackagingDetails = hasExplicitPackagingDetails(
+    entry.packagingMovements,
+  );
+
+  return {
   entryDate: entry.entryDate,
   client: entry.client,
   product: entry.product,
@@ -191,15 +206,18 @@ const formFromEntry = (entry: NaturalEntry): NaturalFormState => ({
   withAnalysis: entry.withAnalysis,
   analysisCode: entry.analysisCode ?? "",
   observations: entry.observations ?? entry.analysisSummary?.notes ?? "",
-  packagingMovements: entry.packagingMovements?.length
-    ? entry.packagingMovements.map((movement, index) =>
+  hasPackagingDetails,
+  packagingMovements:
+    hasPackagingDetails && entry.packagingMovements?.length
+      ? entry.packagingMovements.map((movement, index) =>
         normalizePackagingMovement(
           movement,
           movement.id?.trim() || `PKG-${entry.id}-${index + 1}`,
         ),
       )
-    : [createPackagingMovement("alta")],
-});
+      : [createPackagingMovement("alta")],
+  };
+};
 
 // Meses
 const getMonthKey = (value: string) => value.slice(0, 7);
@@ -356,6 +374,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     supplier: "",
     product: "",
     processCode: "",
+    packagingId: "",
     onlyWithAnalysis: false,
   });
   const [areFiltersVisible, setAreFiltersVisible] = useState(true);
@@ -440,6 +459,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     filters.supplier,
     filters.product,
     filters.processCode,
+    filters.packagingId,
     filters.onlyWithAnalysis,
   ]);
 
@@ -449,6 +469,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     supplier: filters.supplier,
     product: filters.product,
     processCode: filters.processCode,
+    packagingId: filters.packagingId,
   };
 
   const matchesAnalysisFilter = (
@@ -481,6 +502,13 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     entries,
     relationalFilters,
     "processCode",
+    naturalFilterConfig,
+    (entry) => matchesAnalysisFilter(entry, filters.onlyWithAnalysis),
+  );
+  const packagingOptions = getRelationalOptions(
+    entries,
+    relationalFilters,
+    "packagingId",
     naturalFilterConfig,
     (entry) => matchesAnalysisFilter(entry, filters.onlyWithAnalysis),
   );
@@ -538,6 +566,9 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     naturalFormRelationConfig,
     (entry) => entry.withAnalysis,
   );
+  const packagingFormTypeOptions = packagingTypeOptions.filter(
+    (option) => option !== "GRANEL",
+  );
 
   useEffect(() => {
     setFilters((current) => {
@@ -546,6 +577,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
         supplier: current.supplier,
         product: current.product,
         processCode: current.processCode,
+        packagingId: current.packagingId,
       };
       const sanitizedRelational = clearInvalidRelationalSelections(
         entries,
@@ -569,6 +601,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     filters.supplier,
     filters.product,
     filters.processCode,
+    filters.packagingId,
     filters.onlyWithAnalysis,
   ]);
 
@@ -581,12 +614,18 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       !filters.product || entry.product === filters.product;
     const matchesProcess =
       !filters.processCode || entry.processCode === filters.processCode;
+    const matchesPackaging =
+      !filters.packagingId ||
+      getPackagingIdsFromMovements(entry.packagingMovements).includes(
+        filters.packagingId,
+      );
 
     return (
       matchesClient &&
       matchesSupplier &&
       matchesProduct &&
       matchesProcess &&
+      matchesPackaging &&
       matchesAnalysisFilter(entry, filters.onlyWithAnalysis)
     );
   });
@@ -626,6 +665,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     { label: "Proveedor", value: filters.supplier },
     { label: "Proceso", value: filters.processCode },
     { label: "Producto", value: filters.product },
+    { label: "Envase", value: filters.packagingId },
     ...(filters.onlyWithAnalysis
       ? [{ label: "Analisis", value: "Solo con analisis" }]
       : []),
@@ -697,12 +737,14 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   const openCreateModal = () => {
     setEditingEntryId(null);
     setForm(createEmptyForm());
+    setSyncError(null);
     setIsModalOpen(true);
   };
 
   const openEditModal = (entry: NaturalEntry) => {
     setEditingEntryId(entry.id);
     setForm(formFromEntry(entry));
+    setSyncError(null);
     setIsModalOpen(true);
   };
 
@@ -723,6 +765,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   const closeCreateModal = () => {
     setIsModalOpen(false);
     setEditingEntryId(null);
+    setSyncError(null);
   };
 
   const handleFilterChange = (
@@ -737,6 +780,22 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     value: string | number | boolean,
   ) => {
     setForm((current) => {
+      if (field === "hasPackagingDetails") {
+        const hasPackagingDetails = Boolean(value);
+
+        return {
+          ...current,
+          hasPackagingDetails,
+          packagingMovements: hasPackagingDetails
+            ? hasExplicitPackagingDetails(current.packagingMovements)
+              ? current.packagingMovements.map((movement) =>
+                  normalizePackagingMovement(movement, movement.id),
+                )
+              : [createPackagingMovement("alta")]
+            : [createBulkPackagingMovement()],
+        };
+      }
+
       if (field === "withAnalysis") {
         return {
           ...current,
@@ -772,7 +831,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
 
   const handlePackagingMovementChange = (
     movementId: string,
-    field: keyof PackagingMovement,
+    field: keyof PackagingMovementRecord,
     value: string | number,
   ) => {
     setForm((current) => ({
@@ -789,28 +848,19 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
           };
         }
 
-        if (field === "movementType") {
-          return {
-            ...movement,
-            movementType: value === "baja" ? "baja" : "alta",
-          };
-        }
-
         if (field === "packagingType") {
           const newPackagingType = normalizePackagingText(String(value));
 
-          // Envase granel
-          if (newPackagingType === "GRANEL") {
-            return {
-              ...movement,
-              packagingType: newPackagingType,
-              packagingCondition: "",
-              quantity: 0,
-            };
-          }
           return {
             ...movement,
             packagingType: newPackagingType,
+          };
+        }
+
+        if (field === "packagingKg") {
+          return {
+            ...movement,
+            packagingKg: Math.max(0, Number(value) || 0),
           };
         }
 
@@ -863,12 +913,12 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     form.withAnalysis,
   ]);
 
-  const handleAddPackagingMovement = (movementType: PackagingMovementType) => {
+  const handleAddPackagingMovement = () => {
     setForm((current) => ({
       ...current,
       packagingMovements: [
         ...current.packagingMovements,
-        createPackagingMovement(movementType),
+        createPackagingMovement("alta"),
       ],
     }));
   };
@@ -890,6 +940,30 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setSyncError(null);
+
+    const normalizedPackagingMovements = form.hasPackagingDetails
+      ? form.packagingMovements
+          .map((movement, index) =>
+            normalizePackagingMovement(
+              movement,
+              movement.id || `PKG-${editingEntryId ?? Date.now()}-${index + 1}`,
+            ),
+          )
+          .filter(
+            (movement) =>
+              movement.packagingType !== "GRANEL" &&
+              movement.quantity > 0 &&
+              movement.packagingKg > 0,
+          )
+      : [createBulkPackagingMovement()];
+
+    if (form.hasPackagingDetails && !normalizedPackagingMovements.length) {
+      setSyncError(
+        "Carga al menos un envase valido con tipo, estado, kg y cantidad.",
+      );
+      return;
+    }
 
     const nextEntry: NaturalEntry = {
       id: editingEntryId ?? `ING-${Date.now()}`,
@@ -905,14 +979,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       withAnalysis: form.withAnalysis,
       analysisCode: form.withAnalysis ? form.analysisCode.trim() : "",
       observations: form.observations.trim(),
-      packagingMovements: form.packagingMovements
-        .map((movement, index) =>
-          normalizePackagingMovement(
-            movement,
-            movement.id || `PKG-${editingEntryId ?? Date.now()}-${index + 1}`,
-          ),
-        )
-        .filter((movement) => movement.quantity > 0),
+      packagingMovements: normalizedPackagingMovements,
     };
 
     setIsPersisting(true);
@@ -1118,17 +1185,13 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
               entry.packagingMovements.map((movement) => (
                 <div key={movement.id}>
                   <span>Envases</span>
-                  <strong>
-                    {movement.packagingType === "GRANEL"
-                      ? movement.packagingType.toLowerCase()
-                      : `${movement.quantity} ${movement.packagingType.toLowerCase()} ${movement.packagingCondition.toLowerCase()}`}
-                  </strong>
+                  <strong>{formatPackagingMovementLabel(movement)}</strong>
                 </div>
               ))
             ) : (
               <div>
                 <span>Envases</span>
-                <strong>Sin envases cargados</strong>
+                <strong>granel</strong>
               </div>
             )}
           </div>
@@ -1189,15 +1252,16 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
               type="button"
               className="text-button"
               onClick={() =>
-                setFilters({
-                  client: "",
-                  supplier: "",
-                  product: "",
-                  processCode: "",
-                  onlyWithAnalysis: false,
-                })
-              }
-            >
+              setFilters({
+                client: "",
+                supplier: "",
+                product: "",
+                processCode: "",
+                packagingId: "",
+                onlyWithAnalysis: false,
+              })
+            }
+          >
               Limpiar
             </button>
           </div>
@@ -1269,6 +1333,23 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                 {productOptions.map((product) => (
                   <option key={product} value={product}>
                     {product}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="samples-filter-field">
+              Envase
+              <select
+                value={filters.packagingId}
+                onChange={(event) =>
+                  handleFilterChange("packagingId", event.target.value)
+                }
+              >
+                <option value="">Todos</option>
+                {packagingOptions.map((packagingId) => (
+                  <option key={packagingId} value={packagingId}>
+                    {packagingId}
                   </option>
                 ))}
               </select>
@@ -1696,138 +1777,148 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                     </div>
                   </div>
 
-                  <section className="subsection natural-packaging-section">
-                    <div className="card-heading">
-                      <div>
-                        <h3>Envases</h3>
-                      </div>
+                  {syncError ? (
+                    <p className="auth-message auth-message--error">
+                      {syncError}
+                    </p>
+                  ) : null}
 
-                      <div className="natural-record__actions">
-                        <button
-                          type="button"
-                          className="ghost-button compact-button"
-                          onClick={() => handleAddPackagingMovement("alta")}
-                        >
-                          <Plus size={14} />
-                          Agregar otro envase
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-button compact-button"
-                          onClick={() => handleAddPackagingMovement("baja")}
-                        >
-                          <Plus size={14} />
-                          Agregar una baja
-                        </button>
-                      </div>
-                    </div>
+                  <label className="checkbox-row natural-modal__toggle">
+                    <input
+                      type="checkbox"
+                      checked={form.hasPackagingDetails}
+                      onChange={(event) =>
+                        handleFormChange(
+                          "hasPackagingDetails",
+                          event.target.checked,
+                        )
+                      }
+                    />
+                    <span>Registrar envases</span>
+                  </label>
 
-                    <div className="natural-packaging-list">
-                      {form.packagingMovements.map((movement) => (
-                        <div
-                          key={movement.id}
-                          className={`natural-packaging-row${
-                            movement.movementType === "baja"
-                              ? " natural-packaging-row--out"
-                              : ""
-                          }`}
-                        >
-                          <label>
-                            Movimiento
-                            <select
-                              value={movement.movementType}
-                              onChange={(event) =>
-                                handlePackagingMovementChange(
-                                  movement.id,
-                                  "movementType",
-                                  event.target.value,
-                                )
-                              }
-                            >
-                              <option value="alta">Ingreso</option>
-                              <option value="baja">Baja</option>
-                            </select>
-                          </label>
+                  {form.hasPackagingDetails ? (
+                    <section className="subsection natural-packaging-section">
+                      <div className="card-heading">
+                        <div>
+                          <h3>Envases</h3>
+                          <p>Tipo | Estado | Kg | Cantidad</p>
+                        </div>
 
-                          <label>
-                            Tipo de envase
-                            <select
-                              value={movement.packagingType}
-                              onChange={(event) =>
-                                handlePackagingMovementChange(
-                                  movement.id,
-                                  "packagingType",
-                                  event.target.value,
-                                )
-                              }
-                            >
-                              {packagingTypeOptions.map((packagingType) => (
-                                <option
-                                  key={packagingType}
-                                  value={packagingType}
-                                >
-                                  {packagingType}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-
-                          {movement.packagingType !== "GRANEL" && (
-                            <>
-                              <label>
-                                Estado
-                                <select
-                                  value={movement.packagingCondition}
-                                  onChange={(event) =>
-                                    handlePackagingMovementChange(
-                                      movement.id,
-                                      "packagingCondition",
-                                      event.target.value,
-                                    )
-                                  }
-                                >
-                                  {packagingConditionOptions.map(
-                                    (condition) => (
-                                      <option key={condition} value={condition}>
-                                        {condition}
-                                      </option>
-                                    ),
-                                  )}
-                                </select>
-                              </label>
-
-                              <label>
-                                Cantidad
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={movement.quantity}
-                                  onChange={(event) =>
-                                    handlePackagingMovementChange(
-                                      movement.id,
-                                      "quantity",
-                                      Number(event.target.value),
-                                    )
-                                  }
-                                />
-                              </label>
-                            </>
-                          )}
-
+                        <div className="natural-record__actions">
                           <button
                             type="button"
-                            className="ghost-button compact-button danger-button"
-                            onClick={() =>
-                              handleRemovePackagingMovement(movement.id)
-                            }
+                            className="ghost-button compact-button"
+                            onClick={handleAddPackagingMovement}
                           >
-                            <Trash2 size={14} />
-                            Quitar
+                            <Plus size={14} />
+                            Agregar envase
                           </button>
                         </div>
-                      ))}
-                    </div>
-                  </section>
+                      </div>
+
+                      <div className="natural-packaging-list">
+                        {form.packagingMovements.map((movement) => (
+                          <div
+                            key={movement.id}
+                            className="natural-packaging-row"
+                          >
+                            <label>
+                              Tipo
+                              <select
+                                value={movement.packagingType}
+                                onChange={(event) =>
+                                  handlePackagingMovementChange(
+                                    movement.id,
+                                    "packagingType",
+                                    event.target.value,
+                                  )
+                                }
+                              >
+                                {packagingFormTypeOptions.map((packagingType) => (
+                                  <option
+                                    key={packagingType}
+                                    value={packagingType}
+                                  >
+                                    {packagingType}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label>
+                              Estado
+                              <select
+                                value={movement.packagingCondition}
+                                onChange={(event) =>
+                                  handlePackagingMovementChange(
+                                    movement.id,
+                                    "packagingCondition",
+                                    event.target.value,
+                                  )
+                                }
+                              >
+                                {packagingConditionOptions.map((condition) => (
+                                  <option key={condition} value={condition}>
+                                    {condition}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label>
+                              Kg
+                              <input
+                                type="number"
+                                min="1"
+                                required={form.hasPackagingDetails}
+                                value={movement.packagingKg}
+                                onChange={(event) =>
+                                  handlePackagingMovementChange(
+                                    movement.id,
+                                    "packagingKg",
+                                    Number(event.target.value),
+                                  )
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              Cantidad
+                              <input
+                                type="number"
+                                min="1"
+                                required={form.hasPackagingDetails}
+                                value={movement.quantity}
+                                onChange={(event) =>
+                                  handlePackagingMovementChange(
+                                    movement.id,
+                                    "quantity",
+                                    Number(event.target.value),
+                                  )
+                                }
+                              />
+                            </label>
+
+                            <button
+                              type="button"
+                              className="ghost-button compact-button danger-button"
+                              onClick={() =>
+                                handleRemovePackagingMovement(movement.id)
+                              }
+                            >
+                              <Trash2 size={14} />
+                              Quitar
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : (
+                    <p className="natural-packaging-hint">
+                      Si no activas envases, el ingreso se guarda como GRANEL.
+                    </p>
+                  )}
 
                   <label>
                     Observaciones

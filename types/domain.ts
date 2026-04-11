@@ -40,6 +40,7 @@ export interface PackagingMovement {
   movementType: "alta" | "baja";
   packagingType: string;
   packagingCondition: string;
+  packagingKg?: number;
   quantity: number;
 }
 

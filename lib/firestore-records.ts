@@ -17,6 +17,13 @@ import {
   type OperationalRecordKey,
 } from "@/lib/firebase";
 
+const stripUndefinedFields = <TPayload extends Record<string, unknown>>(
+  payload: TPayload,
+) =>
+  Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined),
+  ) as TPayload;
+
 // Tipos
 export interface StoredFirestoreRecord<TPayload extends DocumentData> {
   id: string;
@@ -73,14 +80,17 @@ export const createRecord = async <TPayload extends DocumentData>(
 ) => {
   const recordRef = doc(getOperationalCollection<TPayload>(bucket), recordId);
 
-  await setDoc(recordRef, {
-    ...data,
-    id: recordId,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    createdBy: userId ?? null,
-    updatedBy: userId ?? null,
-  });
+  await setDoc(
+    recordRef,
+    stripUndefinedFields({
+      ...data,
+      id: recordId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      createdBy: userId ?? null,
+      updatedBy: userId ?? null,
+    }),
+  );
 
   return recordRef;
 };
@@ -93,12 +103,12 @@ export const saveRecord = async <TPayload extends DocumentData>(
 ) =>
   setDoc(
     doc(getOperationalCollection<TPayload>(bucket), recordId),
-    {
+    stripUndefinedFields({
       ...data,
       id: recordId,
       updatedAt: serverTimestamp(),
       updatedBy: userId ?? null,
-    },
+    }),
     { merge: true },
   );
 

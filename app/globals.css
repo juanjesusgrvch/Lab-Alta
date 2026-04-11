@@ -4764,7 +4764,7 @@ tbody tr:hover {
 
 .natural-packaging-row {
   display: grid;
-  grid-template-columns: 0.9fr 1.3fr 1fr 0.8fr auto;
+  grid-template-columns: 1.05fr 1fr 0.8fr 0.8fr auto;
   gap: 0.75rem;
   align-items: end;
   padding: 0.85rem;
@@ -4773,9 +4773,14 @@ tbody tr:hover {
   background: rgba(12, 20, 35, 0.16);
 }
 
-.natural-packaging-row--out {
-  border-color: rgba(240, 164, 107, 0.22);
-  background: rgba(240, 164, 107, 0.08);
+.natural-packaging-hint {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border: 1px dashed var(--card-border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 @media (max-width: 780px) {
