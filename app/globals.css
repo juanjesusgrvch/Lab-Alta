@@ -3213,6 +3213,58 @@ tbody tr:hover {
   gap: 0.65rem;
 }
 
+.natural-chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.8rem;
+}
+
+.natural-chart-segments {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: min(100%, 360px);
+  padding-bottom: 0.1rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.natural-chart-segment {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--module-accent-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 78%, var(--module-accent-soft) 22%);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.natural-chart-segment:hover {
+  border-color: var(--module-accent-strong);
+  color: var(--text);
+}
+
+.natural-chart-segment.is-active {
+  border-color: var(--module-accent-strong);
+  background: color-mix(in srgb, var(--module-accent-soft) 70%, var(--card) 30%);
+  color: var(--module-accent-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--module-accent-strong) 28%, transparent);
+}
+
+.natural-chart-year-field {
+  min-width: 118px;
+}
+
 .natural-month-nav span {
   min-width: 132px;
   color: var(--text);
@@ -3293,6 +3345,19 @@ tbody tr:hover {
   .natural-month-nav span {
     min-width: 0;
     flex: 1;
+  }
+
+  .natural-chart-toolbar {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .natural-chart-segments {
+    max-width: 100%;
+  }
+
+  .natural-chart-year-field {
+    width: 100%;
   }
 
   .natural-modal__toggle {

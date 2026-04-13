@@ -80,6 +80,7 @@ const chartColors = [
   "var(--chart-accent-2)",
   "var(--chart-accent-3)",
   "var(--chart-accent-4)",
+  "var(--chart-accent-5)",
 ];
 const chartGridColor = "var(--chart-grid)";
 const chartAxisColor = "var(--chart-axis)";
@@ -121,6 +122,13 @@ type MonthlyScatterPoint = {
   loads: number[];
 };
 
+type NaturalBreakdownGroup = "product" | "client" | "process";
+
+type NaturalBreakdownDatum = {
+  name: string;
+  netKg: number;
+};
+
 // Filtros
 const naturalFilterConfig: Record<
   keyof NaturalRelationalFilters,
@@ -143,7 +151,8 @@ const naturalFilterConfig: Record<
     matches: (entry, value) => entry.processCode === value,
   },
   packagingId: {
-    getValues: (entry) => getPackagingIdsFromMovements(entry.packagingMovements),
+    getValues: (entry) =>
+      getPackagingIdsFromMovements(entry.packagingMovements),
     matches: (entry, value) =>
       getPackagingIdsFromMovements(entry.packagingMovements).includes(value),
   },
@@ -199,7 +208,9 @@ const formFromEntry = (entry: NaturalEntry): NaturalFormState => {
   const hasPackagingDetails = hasExplicitPackagingDetails(
     entry.packagingMovements,
   );
-  const numeroCartaPorte = normalizeUppercaseValue(entry.numeroCartaPorte ?? "");
+  const numeroCartaPorte = normalizeUppercaseValue(
+    entry.numeroCartaPorte ?? "",
+  );
 
   return {
     entryDate: entry.entryDate,
@@ -274,7 +285,7 @@ const getAdjacentMonthKey = (
   const currentIndex = monthKeys.indexOf(currentMonthKey);
 
   if (currentIndex === -1) {
-    return delta < 0 ? monthKeys.at(-1) ?? currentMonthKey : monthKeys[0];
+    return delta < 0 ? (monthKeys.at(-1) ?? currentMonthKey) : monthKeys[0];
   }
 
   const nextIndex = Math.min(
@@ -300,6 +311,27 @@ const getDayTicks = (daysInMonth: number) => {
 
 const formatChartKg = (value: number) =>
   value >= 1000 ? `${Math.round(value / 1000)}k` : `${value}`;
+
+const formatChartNetTons = (value: number) =>
+  new Intl.NumberFormat("es-AR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format((Number.isFinite(value) ? value : 0) / 1000);
+
+const naturalBreakdownOptions: Array<{
+  value: NaturalBreakdownGroup;
+  label: string;
+}> = [
+  { value: "product", label: "Producto" },
+  { value: "client", label: "Cliente" },
+  { value: "process", label: "Proceso" },
+];
+
+const naturalBreakdownLabelMap: Record<NaturalBreakdownGroup, string> = {
+  product: "producto",
+  client: "cliente",
+  process: "proceso",
+};
 
 // Registros
 const normalizeNaturalEntry = (
@@ -330,8 +362,14 @@ const normalizeNaturalEntry = (
 
 const getSortedUniqueOptions = (values: Array<string | null | undefined>) =>
   Array.from(
-    new Set(values.map((value) => normalizePackagingText(value ?? "")).filter(Boolean)),
-  ).sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" }));
+    new Set(
+      values
+        .map((value) => normalizePackagingText(value ?? ""))
+        .filter(Boolean),
+    ),
+  ).sort((left, right) =>
+    left.localeCompare(right, "es", { sensitivity: "base" }),
+  );
 
 const getLatestMonthKey = (entries: NaturalEntry[]) =>
   getMonthKey(
@@ -388,6 +426,8 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     product: "",
     processCode: "",
     packagingId: "",
+    from: "",
+    to: "",
     onlyWithAnalysis: false,
   });
   const [areFiltersVisible, setAreFiltersVisible] = useState(false);
@@ -401,6 +441,9 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   const [activeMonthKey, setActiveMonthKey] = useState(() =>
     getMonthKey(getTodayInBuenosAires()),
   );
+  const [breakdownGroup, setBreakdownGroup] =
+    useState<NaturalBreakdownGroup>("product");
+  const [breakdownYear, setBreakdownYear] = useState("all");
   const [isSyncing, setIsSyncing] = useState(!isDemoMode);
   const [isPersisting, setIsPersisting] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -473,6 +516,8 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     filters.product,
     filters.processCode,
     filters.packagingId,
+    filters.from,
+    filters.to,
     filters.onlyWithAnalysis,
   ]);
 
@@ -490,40 +535,57 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     onlyWithAnalysis: boolean,
   ) => !onlyWithAnalysis || entry.withAnalysis;
 
+  const matchesDateRange = (entry: NaturalEntry, from: string, to: string) => {
+    const matchesFrom = !from || entry.entryDate >= from;
+    const matchesTo = !to || entry.entryDate <= to;
+
+    return matchesFrom && matchesTo;
+  };
+
   const clientOptions = getRelationalOptions(
     entries,
     relationalFilters,
     "client",
     naturalFilterConfig,
-    (entry) => matchesAnalysisFilter(entry, filters.onlyWithAnalysis),
+    (entry) =>
+      matchesAnalysisFilter(entry, filters.onlyWithAnalysis) &&
+      matchesDateRange(entry, filters.from, filters.to),
   );
   const productOptions = getRelationalOptions(
     entries,
     relationalFilters,
     "product",
     naturalFilterConfig,
-    (entry) => matchesAnalysisFilter(entry, filters.onlyWithAnalysis),
+    (entry) =>
+      matchesAnalysisFilter(entry, filters.onlyWithAnalysis) &&
+      matchesDateRange(entry, filters.from, filters.to),
   );
   const supplierOptions = getRelationalOptions(
     entries,
     relationalFilters,
     "supplier",
     naturalFilterConfig,
-    (entry) => matchesAnalysisFilter(entry, filters.onlyWithAnalysis),
+    (entry) =>
+      matchesAnalysisFilter(entry, filters.onlyWithAnalysis) &&
+      matchesDateRange(entry, filters.from, filters.to),
   );
   const processOptions = getRelationalOptions(
     entries,
     relationalFilters,
     "processCode",
     naturalFilterConfig,
-    (entry) => matchesAnalysisFilter(entry, filters.onlyWithAnalysis),
+    (entry) =>
+      matchesAnalysisFilter(entry, filters.onlyWithAnalysis) &&
+      matchesDateRange(entry, filters.from, filters.to),
   );
   const packagingOptions = getRelationalOptions(
     entries,
     relationalFilters,
     "packagingId",
     naturalFilterConfig,
-    (entry) => matchesAnalysisFilter(entry, filters.onlyWithAnalysis),
+    (entry) =>
+      matchesAnalysisFilter(entry, filters.onlyWithAnalysis) &&
+      matchesDateRange(entry, filters.from, filters.to),
   );
 
   const allClientOptions = Array.from(
@@ -588,7 +650,8 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     const matchesAnalysis =
       !form.withAnalysis ||
       (entry.withAnalysis &&
-        (!form.analysisCode || (entry.analysisCode ?? "") === form.analysisCode));
+        (!form.analysisCode ||
+          (entry.analysisCode ?? "") === form.analysisCode));
 
     return (
       matchesClient &&
@@ -601,10 +664,14 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   const packagingSuggestionSource = packagingSuggestionEntries.length
     ? packagingSuggestionEntries
     : entries;
-  const normalizedPackagingMovements = packagingSuggestionSource.flatMap((entry) =>
-    (entry.packagingMovements ?? []).map((movement, index) =>
-      normalizePackagingMovement(movement, `${entry.id}-PACKAGING-${index + 1}`),
-    ),
+  const normalizedPackagingMovements = packagingSuggestionSource.flatMap(
+    (entry) =>
+      (entry.packagingMovements ?? []).map((movement, index) =>
+        normalizePackagingMovement(
+          movement,
+          `${entry.id}-PACKAGING-${index + 1}`,
+        ),
+      ),
   );
   const packagingTypeSuggestions = getSortedUniqueOptions([
     ...packagingTypeOptions.filter((option) => option !== "GRANEL"),
@@ -642,7 +709,9 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
         entries,
         currentRelational,
         naturalFilterConfig,
-        (entry) => matchesAnalysisFilter(entry, current.onlyWithAnalysis),
+        (entry) =>
+          matchesAnalysisFilter(entry, current.onlyWithAnalysis) &&
+          matchesDateRange(entry, current.from, current.to),
       );
 
       if (areStringFiltersEqual(currentRelational, sanitizedRelational)) {
@@ -661,6 +730,8 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     filters.product,
     filters.processCode,
     filters.packagingId,
+    filters.from,
+    filters.to,
     filters.onlyWithAnalysis,
   ]);
 
@@ -685,7 +756,8 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       matchesProduct &&
       matchesProcess &&
       matchesPackaging &&
-      matchesAnalysisFilter(entry, filters.onlyWithAnalysis)
+      matchesAnalysisFilter(entry, filters.onlyWithAnalysis) &&
+      matchesDateRange(entry, filters.from, filters.to)
     );
   });
 
@@ -725,29 +797,70 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     { label: "Proceso", value: filters.processCode },
     { label: "Producto", value: filters.product },
     { label: "Envase", value: filters.packagingId },
+    { label: "Desde", value: filters.from ? formatDate(filters.from) : "" },
+    { label: "Hasta", value: filters.to ? formatDate(filters.to) : "" },
     ...(filters.onlyWithAnalysis
       ? [{ label: "Analisis", value: "Solo con analisis" }]
       : []),
   ].filter((item) => item.value);
   const pdfEntryPages = chunkPdfItems(sortedEntries);
+  const availableBreakdownYears = Array.from(
+    new Set(
+      filteredEntries
+        .map((entry) => entry.entryDate.slice(0, 4))
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => right.localeCompare(left));
 
-  const inboundByProductMap = new Map<string, number>();
-  filteredEntries.forEach((entry) => {
-    inboundByProductMap.set(
-      entry.product,
-      (inboundByProductMap.get(entry.product) ?? 0) + entry.netKg,
+  useEffect(() => {
+    if (breakdownYear === "all") {
+      return;
+    }
+
+    if (!availableBreakdownYears.includes(breakdownYear)) {
+      setBreakdownYear("all");
+    }
+  }, [availableBreakdownYears, breakdownYear]);
+
+  const breakdownSourceEntries = filteredEntries.filter((entry) =>
+    breakdownYear === "all"
+      ? true
+      : entry.entryDate.startsWith(`${breakdownYear}-`),
+  );
+  const breakdownMap = new Map<string, number>();
+
+  breakdownSourceEntries.forEach((entry) => {
+    const breakdownKey =
+      breakdownGroup === "client"
+        ? entry.client
+        : breakdownGroup === "process"
+          ? entry.processCode
+          : entry.product;
+    const safeLabel = breakdownKey?.trim() || "SIN DATO";
+
+    breakdownMap.set(
+      safeLabel,
+      (breakdownMap.get(safeLabel) ?? 0) + entry.netKg,
     );
   });
 
-  const inboundByProduct = Array.from(inboundByProductMap.entries())
+  const inboundBreakdownData: NaturalBreakdownDatum[] = Array.from(
+    breakdownMap.entries(),
+  )
     .map(([name, netKg]) => ({ name, netKg }))
     .sort((left, right) => right.netKg - left.netKg);
+  const breakdownTitle = `Toneladas por ${naturalBreakdownLabelMap[breakdownGroup]}`;
 
   const activeMonth = parseMonthKey(activeMonthKey) ?? {
     year: Number(getTodayInBuenosAires().slice(0, 4)),
     monthIndex: Number(getTodayInBuenosAires().slice(5, 7)) - 1,
   };
-  const activeMonthDate = new Date(activeMonth.year, activeMonth.monthIndex, 1, 12);
+  const activeMonthDate = new Date(
+    activeMonth.year,
+    activeMonth.monthIndex,
+    1,
+    12,
+  );
   const daysInActiveMonth = new Date(
     activeMonthDate.getFullYear(),
     activeMonthDate.getMonth() + 1,
@@ -1045,9 +1158,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       netKg: form.netKg,
       withAnalysis: form.withAnalysis,
       analysisCode: form.withAnalysis ? form.analysisCode.trim() : "",
-      numeroCartaPorte: form.hasCartaPorte
-        ? form.numeroCartaPorte.trim()
-        : "",
+      numeroCartaPorte: form.hasCartaPorte ? form.numeroCartaPorte.trim() : "",
       observations: form.observations.trim(),
       packagingMovements: normalizedPackagingMovements,
     };
@@ -1250,7 +1361,9 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
             </div>
             <div>
               <span>Carta de porte</span>
-              <strong>{entry.numeroCartaPorte?.trim() || "Sin carta de porte"}</strong>
+              <strong>
+                {entry.numeroCartaPorte?.trim() || "Sin carta de porte"}
+              </strong>
             </div>
           </div>
 
@@ -1326,16 +1439,18 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
               type="button"
               className="text-button"
               onClick={() =>
-              setFilters({
-                client: "",
-                supplier: "",
-                product: "",
-                processCode: "",
-                packagingId: "",
-                onlyWithAnalysis: false,
-              })
-            }
-          >
+                setFilters({
+                  client: "",
+                  supplier: "",
+                  product: "",
+                  processCode: "",
+                  packagingId: "",
+                  from: "",
+                  to: "",
+                  onlyWithAnalysis: false,
+                })
+              }
+            >
               Limpiar
             </button>
           </div>
@@ -1429,6 +1544,28 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
               </select>
             </label>
 
+            <label className="samples-filter-field">
+              Desde
+              <input
+                type="date"
+                value={filters.from}
+                onChange={(event) =>
+                  handleFilterChange("from", event.target.value)
+                }
+              />
+            </label>
+
+            <label className="samples-filter-field">
+              Hasta
+              <input
+                type="date"
+                value={filters.to}
+                onChange={(event) =>
+                  handleFilterChange("to", event.target.value)
+                }
+              />
+            </label>
+
             <label className="checkbox-row natural-filter-toggle">
               <input
                 type="checkbox"
@@ -1510,11 +1647,54 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       </SectionCard>
 
       <div className="module-grid natural-analytics-grid">
-        <SectionCard title="Ingreso kg netos por producto">
+        <SectionCard
+          title={breakdownTitle}
+          action={
+            <div className="natural-chart-toolbar">
+              <div
+                className="natural-chart-segments"
+                role="tablist"
+                aria-label="Agrupar ingresos netos"
+              >
+                {naturalBreakdownOptions.map((option) => {
+                  const isActive = breakdownGroup === option.value;
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      className={`natural-chart-segment${isActive ? " is-active" : ""}`}
+                      onClick={() => setBreakdownGroup(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <label className="samples-filter-field natural-chart-year-field">
+                Año
+                <select
+                  value={breakdownYear}
+                  onChange={(event) => setBreakdownYear(event.target.value)}
+                >
+                  <option value="all">Historico</option>
+                  {availableBreakdownYears.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          }
+        >
           <div className="chart-shell natural-chart-shell">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
-                data={inboundByProduct}
+                data={inboundBreakdownData}
                 layout="vertical"
                 margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
               >
@@ -1526,7 +1706,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                 <XAxis
                   type="number"
                   stroke={chartAxisColor}
-                  tickFormatter={formatChartKg}
+                  tickFormatter={formatChartNetTons}
                 />
                 <YAxis
                   type="category"
@@ -1535,10 +1715,13 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                   stroke={chartAxisColor}
                 />
                 <Tooltip
-                  formatter={(value: number) => [formatKg(value), "Kg netos"]}
+                  formatter={(value: number) => [
+                    `${formatChartNetTons(value)} tn`,
+                    "TN",
+                  ]}
                 />
                 <Bar dataKey="netKg" radius={[0, 6, 6, 0]} barSize={18}>
-                  {inboundByProduct.map((entry, index) => (
+                  {inboundBreakdownData.map((entry, index) => (
                     <Cell
                       key={`${entry.name}-${index}`}
                       fill={chartColors[index % chartColors.length]}
@@ -1554,32 +1737,32 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
           title="Descargas por fecha"
           action={
             <div className="natural-month-nav">
-                <button
-                  type="button"
-                  className="ghost-button compact-button"
-                  onClick={() =>
-                    setActiveMonthKey((current) =>
-                      getAdjacentMonthKey(availableMonthKeys, current, -1),
-                    )
-                  }
-                  disabled={!hasPreviousMonth}
-                  aria-label="Mes anterior"
-                >
-                  <ChevronLeft size={16} />
+              <button
+                type="button"
+                className="ghost-button compact-button"
+                onClick={() =>
+                  setActiveMonthKey((current) =>
+                    getAdjacentMonthKey(availableMonthKeys, current, -1),
+                  )
+                }
+                disabled={!hasPreviousMonth}
+                aria-label="Mes anterior"
+              >
+                <ChevronLeft size={16} />
               </button>
               <span>{formatMonthLabel(activeMonthKey)}</span>
-                <button
-                  type="button"
-                  className="ghost-button compact-button"
-                  onClick={() =>
-                    setActiveMonthKey((current) =>
-                      getAdjacentMonthKey(availableMonthKeys, current, 1),
-                    )
-                  }
-                  disabled={!hasNextMonth}
-                  aria-label="Mes siguiente"
-                >
-                  <ChevronRight size={16} />
+              <button
+                type="button"
+                className="ghost-button compact-button"
+                onClick={() =>
+                  setActiveMonthKey((current) =>
+                    getAdjacentMonthKey(availableMonthKeys, current, 1),
+                  )
+                }
+                disabled={!hasNextMonth}
+                aria-label="Mes siguiente"
+              >
+                <ChevronRight size={16} />
               </button>
             </div>
           }
@@ -1621,10 +1804,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
 
       {isPreparingPdf ? (
         <PdfExportPortal>
-          <PdfExportRoot
-            ref={exportRef}
-            className="pdf-export-root--natural"
-          >
+          <PdfExportRoot ref={exportRef} className="pdf-export-root--natural">
             {pdfEntryPages.length ? (
               pdfEntryPages.map((entriesPage, pageIndex) => (
                 <PdfExportPage
@@ -1782,19 +1962,31 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                           }
                         />
                       </label>
-                      <label>
-                        Kg neto *
+                      <label className="checkbox-row natural-modal__toggle">
                         <input
-                          type="number"
-                          min="0"
-                          required
-                          value={form.netKg}
+                          type="checkbox"
+                          checked={form.withAnalysis}
                           onChange={(event) =>
                             handleFormChange(
-                              "netKg",
-                              Number(event.target.value),
+                              "withAnalysis",
+                              event.target.checked,
                             )
                           }
+                        />
+                        <span>Analisis</span>
+                      </label>
+                      <label>
+                        Codigo de analisis
+                        <input
+                          type="text"
+                          list="natural-analysis-options"
+                          disabled={!form.withAnalysis}
+                          required={form.withAnalysis}
+                          value={form.analysisCode}
+                          onChange={(event) =>
+                            handleFormChange("analysisCode", event.target.value)
+                          }
+                          placeholder="MUIN-232"
                         />
                       </label>
                     </div>
@@ -1822,32 +2014,22 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                           }
                         />
                       </label>
-                      <label className="checkbox-row natural-modal__toggle">
+                      <label>
+                        Kg neto *
                         <input
-                          type="checkbox"
-                          checked={form.withAnalysis}
+                          type="number"
+                          min="0"
+                          required
+                          value={form.netKg}
                           onChange={(event) =>
                             handleFormChange(
-                              "withAnalysis",
-                              event.target.checked,
+                              "netKg",
+                              Number(event.target.value),
                             )
                           }
                         />
-                        <span>Analisis</span>
                       </label>
-                      <label>
-                        Codigo de analisis
-                        <input
-                          type="text"
-                          list="natural-analysis-options"
-                          disabled={!form.withAnalysis}
-                          required={form.withAnalysis}
-                          value={form.analysisCode}
-                          onChange={(event) =>
-                            handleFormChange("analysisCode", event.target.value)
-                          }
-                        />
-                      </label>
+
                       <label className="checkbox-row natural-modal__toggle">
                         <input
                           type="checkbox"
