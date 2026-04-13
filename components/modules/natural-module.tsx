@@ -95,6 +95,8 @@ type NaturalFormState = {
   processCode: string;
   withAnalysis: boolean;
   analysisCode: string;
+  hasCartaPorte: boolean;
+  numeroCartaPorte: string;
   observations: string;
   hasPackagingDetails: boolean;
   packagingMovements: PackagingMovementRecord[];
@@ -186,6 +188,8 @@ const createEmptyForm = (): NaturalFormState => ({
   processCode: "",
   withAnalysis: false,
   analysisCode: "",
+  hasCartaPorte: false,
+  numeroCartaPorte: "",
   observations: "",
   hasPackagingDetails: false,
   packagingMovements: [createPackagingMovement("alta")],
@@ -195,27 +199,30 @@ const formFromEntry = (entry: NaturalEntry): NaturalFormState => {
   const hasPackagingDetails = hasExplicitPackagingDetails(
     entry.packagingMovements,
   );
+  const numeroCartaPorte = normalizeUppercaseValue(entry.numeroCartaPorte ?? "");
 
   return {
-  entryDate: entry.entryDate,
-  client: entry.client,
-  product: entry.product,
-  netKg: entry.netKg,
-  supplier: entry.supplier,
-  processCode: entry.processCode,
-  withAnalysis: entry.withAnalysis,
-  analysisCode: entry.analysisCode ?? "",
-  observations: entry.observations ?? entry.analysisSummary?.notes ?? "",
-  hasPackagingDetails,
-  packagingMovements:
-    hasPackagingDetails && entry.packagingMovements?.length
-      ? entry.packagingMovements.map((movement, index) =>
-        normalizePackagingMovement(
-          movement,
-          movement.id?.trim() || `PKG-${entry.id}-${index + 1}`,
-        ),
-      )
-      : [createPackagingMovement("alta")],
+    entryDate: entry.entryDate,
+    client: entry.client,
+    product: entry.product,
+    netKg: entry.netKg,
+    supplier: entry.supplier,
+    processCode: entry.processCode,
+    withAnalysis: entry.withAnalysis,
+    analysisCode: entry.analysisCode ?? "",
+    hasCartaPorte: Boolean(numeroCartaPorte),
+    numeroCartaPorte,
+    observations: entry.observations ?? entry.analysisSummary?.notes ?? "",
+    hasPackagingDetails,
+    packagingMovements:
+      hasPackagingDetails && entry.packagingMovements?.length
+        ? entry.packagingMovements.map((movement, index) =>
+            normalizePackagingMovement(
+              movement,
+              movement.id?.trim() || `PKG-${entry.id}-${index + 1}`,
+            ),
+          )
+        : [createPackagingMovement("alta")],
   };
 };
 
@@ -311,6 +318,7 @@ const normalizeNaturalEntry = (
   netKg: Number(entry.netKg ?? 0),
   withAnalysis: Boolean(entry.withAnalysis),
   analysisCode: entry.analysisCode ?? "",
+  numeroCartaPorte: normalizeUppercaseValue(entry.numeroCartaPorte ?? ""),
   observations: entry.observations ?? "",
   packagingMovements: Array.isArray(entry.packagingMovements)
     ? entry.packagingMovements.map((movement, index) =>
@@ -319,6 +327,11 @@ const normalizeNaturalEntry = (
     : [],
   analysisSummary: entry.analysisSummary,
 });
+
+const getSortedUniqueOptions = (values: Array<string | null | undefined>) =>
+  Array.from(
+    new Set(values.map((value) => normalizePackagingText(value ?? "")).filter(Boolean)),
+  ).sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" }));
 
 const getLatestMonthKey = (entries: NaturalEntry[]) =>
   getMonthKey(
@@ -377,7 +390,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     packagingId: "",
     onlyWithAnalysis: false,
   });
-  const [areFiltersVisible, setAreFiltersVisible] = useState(true);
+  const [areFiltersVisible, setAreFiltersVisible] = useState(false);
   const [form, setForm] = useState(createEmptyForm);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -566,9 +579,55 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     naturalFormRelationConfig,
     (entry) => entry.withAnalysis,
   );
-  const packagingFormTypeOptions = packagingTypeOptions.filter(
-    (option) => option !== "GRANEL",
+  const packagingSuggestionEntries = entries.filter((entry) => {
+    const matchesClient = !form.client || entry.client === form.client;
+    const matchesSupplier = !form.supplier || entry.supplier === form.supplier;
+    const matchesProduct = !form.product || entry.product === form.product;
+    const matchesProcess =
+      !form.processCode || entry.processCode === form.processCode;
+    const matchesAnalysis =
+      !form.withAnalysis ||
+      (entry.withAnalysis &&
+        (!form.analysisCode || (entry.analysisCode ?? "") === form.analysisCode));
+
+    return (
+      matchesClient &&
+      matchesSupplier &&
+      matchesProduct &&
+      matchesProcess &&
+      matchesAnalysis
+    );
+  });
+  const packagingSuggestionSource = packagingSuggestionEntries.length
+    ? packagingSuggestionEntries
+    : entries;
+  const normalizedPackagingMovements = packagingSuggestionSource.flatMap((entry) =>
+    (entry.packagingMovements ?? []).map((movement, index) =>
+      normalizePackagingMovement(movement, `${entry.id}-PACKAGING-${index + 1}`),
+    ),
   );
+  const packagingTypeSuggestions = getSortedUniqueOptions([
+    ...packagingTypeOptions.filter((option) => option !== "GRANEL"),
+    ...normalizedPackagingMovements
+      .filter((movement) => movement.packagingType !== "GRANEL")
+      .map((movement) => movement.packagingType),
+  ]);
+  const packagingConditionSuggestions = getSortedUniqueOptions([
+    ...packagingConditionOptions,
+    ...normalizedPackagingMovements
+      .filter((movement) => movement.packagingType !== "GRANEL")
+      .map((movement) => movement.packagingCondition),
+  ]);
+  const packagingKgSuggestions = Array.from(
+    new Set(
+      normalizedPackagingMovements
+        .filter(
+          (movement) =>
+            movement.packagingType !== "GRANEL" && movement.packagingKg > 0,
+        )
+        .map((movement) => movement.packagingKg),
+    ),
+  ).sort((left, right) => left - right);
 
   useEffect(() => {
     setFilters((current) => {
@@ -804,6 +863,14 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
         };
       }
 
+      if (field === "hasCartaPorte") {
+        return {
+          ...current,
+          hasCartaPorte: Boolean(value),
+          numeroCartaPorte: value ? current.numeroCartaPorte : "",
+        };
+      }
+
       if (field === "netKg" && typeof value === "number") {
         return {
           ...current,
@@ -978,6 +1045,9 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       netKg: form.netKg,
       withAnalysis: form.withAnalysis,
       analysisCode: form.withAnalysis ? form.analysisCode.trim() : "",
+      numeroCartaPorte: form.hasCartaPorte
+        ? form.numeroCartaPorte.trim()
+        : "",
       observations: form.observations.trim(),
       packagingMovements: normalizedPackagingMovements,
     };
@@ -1177,6 +1247,10 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                   ? entry.analysisCode || "Sin codigo"
                   : "No aplica"}
               </strong>
+            </div>
+            <div>
+              <span>Carta de porte</span>
+              <strong>{entry.numeroCartaPorte?.trim() || "Sin carta de porte"}</strong>
             </div>
           </div>
 
@@ -1774,6 +1848,35 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                           }
                         />
                       </label>
+                      <label className="checkbox-row natural-modal__toggle">
+                        <input
+                          type="checkbox"
+                          checked={form.hasCartaPorte}
+                          onChange={(event) =>
+                            handleFormChange(
+                              "hasCartaPorte",
+                              event.target.checked,
+                            )
+                          }
+                        />
+                        <span>Carta de porte</span>
+                      </label>
+                      <label>
+                        Numero de carta de porte
+                        <input
+                          type="text"
+                          disabled={!form.hasCartaPorte}
+                          required={form.hasCartaPorte}
+                          value={form.numeroCartaPorte}
+                          onChange={(event) =>
+                            handleFormChange(
+                              "numeroCartaPorte",
+                              event.target.value,
+                            )
+                          }
+                          placeholder="CP-000000"
+                        />
+                      </label>
                     </div>
                   </div>
 
@@ -1825,7 +1928,9 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                           >
                             <label>
                               Tipo
-                              <select
+                              <input
+                                type="text"
+                                list="natural-packaging-type-options"
                                 value={movement.packagingType}
                                 onChange={(event) =>
                                   handlePackagingMovementChange(
@@ -1834,21 +1939,15 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                                     event.target.value,
                                   )
                                 }
-                              >
-                                {packagingFormTypeOptions.map((packagingType) => (
-                                  <option
-                                    key={packagingType}
-                                    value={packagingType}
-                                  >
-                                    {packagingType}
-                                  </option>
-                                ))}
-                              </select>
+                                placeholder="BOLSON"
+                              />
                             </label>
 
                             <label>
                               Estado
-                              <select
+                              <input
+                                type="text"
+                                list="natural-packaging-condition-options"
                                 value={movement.packagingCondition}
                                 onChange={(event) =>
                                   handlePackagingMovementChange(
@@ -1857,13 +1956,8 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                                     event.target.value,
                                   )
                                 }
-                              >
-                                {packagingConditionOptions.map((condition) => (
-                                  <option key={condition} value={condition}>
-                                    {condition}
-                                  </option>
-                                ))}
-                              </select>
+                                placeholder="USADO"
+                              />
                             </label>
 
                             <label>
@@ -1871,6 +1965,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                               <input
                                 type="number"
                                 min="1"
+                                list="natural-packaging-kg-options"
                                 required={form.hasPackagingDetails}
                                 value={movement.packagingKg}
                                 onChange={(event) =>
@@ -2002,6 +2097,24 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                     : allAnalysisCodes.map((analysisCode) => (
                         <option key={analysisCode} value={analysisCode} />
                       ))}
+                </datalist>
+
+                <datalist id="natural-packaging-type-options">
+                  {packagingTypeSuggestions.map((packagingType) => (
+                    <option key={packagingType} value={packagingType} />
+                  ))}
+                </datalist>
+
+                <datalist id="natural-packaging-condition-options">
+                  {packagingConditionSuggestions.map((condition) => (
+                    <option key={condition} value={condition} />
+                  ))}
+                </datalist>
+
+                <datalist id="natural-packaging-kg-options">
+                  {packagingKgSuggestions.map((packagingKg) => (
+                    <option key={packagingKg} value={String(packagingKg)} />
+                  ))}
                 </datalist>
               </div>
             </div>,

@@ -57,6 +57,7 @@ export interface NaturalEntry {
   netKg: number;
   withAnalysis: boolean;
   analysisCode?: string;
+  numeroCartaPorte?: string;
   observations: string;
   packagingMovements?: PackagingMovement[];
   analysisSummary?: NaturalAnalysisSummary;

@@ -497,7 +497,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     from: "",
     to: "",
   });
-  const [areFiltersVisible, setAreFiltersVisible] = useState(true);
+  const [areFiltersVisible, setAreFiltersVisible] = useState(false);
   const [form, setForm] = useState<DefectFormState>(createEmptyForm);
   const [editingAnalysisId, setEditingAnalysisId] = useState<string | null>(
     null,

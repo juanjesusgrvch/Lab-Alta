@@ -285,7 +285,7 @@ export const SamplesModule = ({
     processCode: "",
     status: "",
   });
-  const [areFiltersVisible, setAreFiltersVisible] = useState(true);
+  const [areFiltersVisible, setAreFiltersVisible] = useState(false);
   const [form, setForm] = useState(createEmptyForm);
   const [editingSampleId, setEditingSampleId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);

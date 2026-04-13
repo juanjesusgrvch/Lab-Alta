@@ -159,6 +159,7 @@ export const createDemoNaturalEntries = (): NaturalEntry[] => {
       netKg: 21000,
       withAnalysis: true,
       analysisCode: "ANL-2401-A",
+      numeroCartaPorte: "CP-2401-001",
       observations: "INGRESO PARA CLASIFICACION.",
       packagingMovements: [
         {
@@ -189,6 +190,7 @@ export const createDemoNaturalEntries = (): NaturalEntry[] => {
       netKg: 20000,
       withAnalysis: true,
       analysisCode: "ANL-2401-B",
+      numeroCartaPorte: "CP-2401-002",
       observations: "SEPARAR LOTE PARA CONTROL DE DENSIMETRICA.",
       packagingMovements: [
         {
@@ -237,6 +239,7 @@ export const createDemoNaturalEntries = (): NaturalEntry[] => {
       netKg: 15000,
       withAnalysis: true,
       analysisCode: "ANL-2450-A",
+      numeroCartaPorte: "CP-2450-001",
       observations: "USO INDUSTRIAL, CONTROLAR DESPACHO INTERNO.",
       packagingMovements: [
         {
