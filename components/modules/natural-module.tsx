@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 
+import { ModuleSearchToolbar } from "@/components/dashboard/module-search-toolbar";
 import { MetricCard, SectionCard } from "@/components/dashboard/primitives";
 import {
   chunkPdfItems,
@@ -71,8 +72,23 @@ import {
   type RelationalFieldConfig,
 } from "@/lib/relational-filters";
 import type { DashboardDataMode } from "@/lib/dashboard-data-mode";
+import { buildNaturalRelationalSeeds } from "@/lib/dashboard-relational-seeds";
+import {
+  getCampaignDisplayName,
+  getCampaignRange,
+  getDefaultCampaignId,
+} from "@/lib/module-campaigns";
+import {
+  getSearchSuggestions,
+  matchesSearchTerm,
+  type SearchFieldConfig,
+} from "@/lib/module-search";
 import { createDemoNaturalEntries } from "@/lib/demo-data";
-import type { NaturalEntry } from "@/types/domain";
+import type {
+  DashboardCampaign,
+  DashboardRelationalSeed,
+  NaturalEntry,
+} from "@/types/domain";
 
 // Configuracion
 const chartColors = [
@@ -127,6 +143,14 @@ type NaturalBreakdownGroup = "product" | "client" | "process";
 type NaturalBreakdownDatum = {
   name: string;
   netKg: number;
+};
+
+type ChartAxisTickProps = {
+  x?: number;
+  y?: number;
+  payload?: {
+    value?: number | string;
+  };
 };
 
 // Filtros
@@ -184,9 +208,76 @@ const naturalFormRelationConfig: Record<
   },
 };
 
+const naturalSharedFormRelationConfig: Record<
+  keyof NaturalFormRelations,
+  RelationalFieldConfig<DashboardRelationalSeed>
+> = {
+  client: {
+    getValues: (seed) => [seed.client],
+    matches: (seed, value) => seed.client === value,
+  },
+  supplier: {
+    getValues: (seed) => [seed.supplier],
+    matches: (seed, value) => seed.supplier === value,
+  },
+  product: {
+    getValues: (seed) => [seed.product],
+    matches: (seed, value) => seed.product === value,
+  },
+  processCode: {
+    getValues: (seed) => [seed.processCode],
+    matches: (seed, value) => seed.processCode === value,
+  },
+  analysisCode: {
+    getValues: (seed) => [seed.analysisReference],
+    matches: (seed, value) => seed.analysisReference === value,
+  },
+};
+
+const naturalSearchConfig: Record<string, SearchFieldConfig<NaturalEntry>> = {
+  client: {
+    label: "Cliente",
+    getValues: (entry) => [entry.client],
+  },
+  supplier: {
+    label: "Procedencia",
+    getValues: (entry) => [entry.supplier],
+  },
+  product: {
+    label: "Producto",
+    getValues: (entry) => [entry.product],
+  },
+  processCode: {
+    label: "Proceso",
+    getValues: (entry) => [entry.processCode],
+  },
+  analysisCode: {
+    label: "Analisis",
+    getValues: (entry) => [entry.analysisCode],
+  },
+  numeroCartaPorte: {
+    label: "Carta de porte",
+    getValues: (entry) => [entry.numeroCartaPorte],
+  },
+  packaging: {
+    label: "Envase",
+    getValues: (entry) =>
+      entry.packagingMovements?.length
+        ? entry.packagingMovements.map((movement) =>
+            formatPackagingMovementLabel(movement),
+          )
+        : ["GRANEL"],
+  },
+};
+
 // Formulario
 const normalizeUppercaseValue = (value: string) =>
   value.replace(/\s+/g, " ").replace(/^\s+/, "").toUpperCase();
+
+const getSortedTextOptions = (values: Array<string | null | undefined>) =>
+  Array.from(
+    new Set(values.map((value) => value?.trim() ?? "").filter(Boolean)),
+  ).sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" }));
 
 const createEmptyForm = (): NaturalFormState => ({
   entryDate: getTodayInBuenosAires(),
@@ -318,6 +409,133 @@ const formatChartNetTons = (value: number) =>
     maximumFractionDigits: 2,
   }).format((Number.isFinite(value) ? value : 0) / 1000);
 
+const BREAKDOWN_AXIS_MIN_WIDTH = 136;
+const BREAKDOWN_AXIS_MAX_WIDTH = 240;
+const BREAKDOWN_AXIS_LINE_LENGTH = 18;
+const BREAKDOWN_AXIS_MAX_LINES = 3;
+const BREAKDOWN_ROW_MIN_HEIGHT = 34;
+const BREAKDOWN_ROW_LINE_HEIGHT = 14;
+const BREAKDOWN_CHART_BASE_HEIGHT = 300;
+const BREAKDOWN_CHART_PADDING = 28;
+
+const chunkLongWord = (word: string) => {
+  const chunks: string[] = [];
+
+  for (let index = 0; index < word.length; index += BREAKDOWN_AXIS_LINE_LENGTH) {
+    chunks.push(word.slice(index, index + BREAKDOWN_AXIS_LINE_LENGTH));
+  }
+
+  return chunks;
+};
+
+const splitBreakdownLabel = (value: string) => {
+  const normalizedValue = value.trim();
+
+  if (!normalizedValue) {
+    return ["SIN DATO"];
+  }
+
+  const words = normalizedValue
+    .split(/\s+/)
+    .flatMap((word) =>
+      word.length > BREAKDOWN_AXIS_LINE_LENGTH ? chunkLongWord(word) : [word],
+    );
+  const lines: string[] = [];
+  let currentLine = "";
+
+  words.forEach((word) => {
+    const nextLine = currentLine ? `${currentLine} ${word}` : word;
+
+    if (nextLine.length <= BREAKDOWN_AXIS_LINE_LENGTH) {
+      currentLine = nextLine;
+      return;
+    }
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    currentLine = word;
+  });
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  if (lines.length <= BREAKDOWN_AXIS_MAX_LINES) {
+    return lines;
+  }
+
+  const truncatedLines = lines.slice(0, BREAKDOWN_AXIS_MAX_LINES);
+  const lastLine = truncatedLines[BREAKDOWN_AXIS_MAX_LINES - 1] ?? "";
+  truncatedLines[BREAKDOWN_AXIS_MAX_LINES - 1] = lastLine.endsWith("...")
+    ? lastLine
+    : `${lastLine.slice(0, Math.max(BREAKDOWN_AXIS_LINE_LENGTH - 3, 1)).trimEnd()}...`;
+
+  return truncatedLines;
+};
+
+const getBreakdownAxisWidth = (rows: NaturalBreakdownDatum[]) => {
+  const longestLineLength = rows.reduce((maxLength, row) => {
+    const lineLength = splitBreakdownLabel(row.name).reduce(
+      (currentMax, line) => Math.max(currentMax, line.length),
+      0,
+    );
+
+    return Math.max(maxLength, lineLength);
+  }, 0);
+
+  return Math.min(
+    BREAKDOWN_AXIS_MAX_WIDTH,
+    Math.max(BREAKDOWN_AXIS_MIN_WIDTH, longestLineLength * 7 + 20),
+  );
+};
+
+const getBreakdownChartHeight = (rows: NaturalBreakdownDatum[]) => {
+  const calculatedHeight = rows.reduce((totalHeight, row) => {
+    const lineCount = splitBreakdownLabel(row.name).length;
+    const rowHeight = Math.max(
+      BREAKDOWN_ROW_MIN_HEIGHT,
+      lineCount * BREAKDOWN_ROW_LINE_HEIGHT + 10,
+    );
+
+    return totalHeight + rowHeight;
+  }, BREAKDOWN_CHART_PADDING);
+
+  return Math.max(BREAKDOWN_CHART_BASE_HEIGHT, calculatedHeight);
+};
+
+const renderBreakdownYAxisTick = ({
+  x = 0,
+  y = 0,
+  payload,
+}: ChartAxisTickProps) => {
+  const lines = splitBreakdownLabel(String(payload?.value ?? ""));
+  const offsetY = ((lines.length - 1) * BREAKDOWN_ROW_LINE_HEIGHT) / 2;
+
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        x={-8}
+        y={-offsetY}
+        fill={chartAxisColor}
+        textAnchor="end"
+        fontSize={12}
+      >
+        {lines.map((line, index) => (
+          <tspan
+            key={`${line}-${index}`}
+            x={-8}
+            dy={index === 0 ? 0 : BREAKDOWN_ROW_LINE_HEIGHT}
+          >
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
+};
+
 const naturalBreakdownOptions: Array<{
   value: NaturalBreakdownGroup;
   label: string;
@@ -412,22 +630,40 @@ const NaturalScatterTooltip = ({
 
 interface NaturalModuleProps {
   dataMode?: DashboardDataMode;
+  campaigns: DashboardCampaign[];
+  defaultCampaignId: string;
+  relationalSeeds: DashboardRelationalSeed[];
 }
 
 // Modulo
-export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
+export const NaturalModule = ({
+  dataMode = "live",
+  campaigns,
+  defaultCampaignId,
+  relationalSeeds,
+}: NaturalModuleProps) => {
   const isDemoMode = dataMode === "demo";
+  const resolvedDefaultCampaignId = getDefaultCampaignId(
+    campaigns,
+    defaultCampaignId,
+  );
+  const defaultCampaignRange = getCampaignRange(
+    campaigns,
+    resolvedDefaultCampaignId,
+  );
   const [entries, setEntries] = useState<NaturalEntry[]>(() =>
     isDemoMode ? createDemoNaturalEntries() : [],
   );
   const [filters, setFilters] = useState({
+    campaignId: defaultCampaignRange.campaignId,
+    search: "",
     client: "",
     supplier: "",
     product: "",
     processCode: "",
     packagingId: "",
-    from: "",
-    to: "",
+    from: defaultCampaignRange.from,
+    to: defaultCampaignRange.to,
     onlyWithAnalysis: false,
   });
   const [areFiltersVisible, setAreFiltersVisible] = useState(false);
@@ -511,6 +747,8 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   useEffect(() => {
     setCurrentPage(1);
   }, [
+    filters.campaignId,
+    filters.search,
     filters.client,
     filters.supplier,
     filters.product,
@@ -519,6 +757,54 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     filters.from,
     filters.to,
     filters.onlyWithAnalysis,
+  ]);
+
+  useEffect(() => {
+    setFilters((current) => {
+      if (current.campaignId) {
+        const selectedCampaignRange = getCampaignRange(
+          campaigns,
+          current.campaignId,
+        );
+
+        if (selectedCampaignRange.campaignId) {
+          if (
+            current.from === selectedCampaignRange.from &&
+            current.to === selectedCampaignRange.to
+          ) {
+            return current;
+          }
+
+          return {
+            ...current,
+            from: selectedCampaignRange.from,
+            to: selectedCampaignRange.to,
+          };
+        }
+      }
+
+      if (!current.from && !current.to && resolvedDefaultCampaignId) {
+        return {
+          ...current,
+          campaignId: defaultCampaignRange.campaignId,
+          from: defaultCampaignRange.from,
+          to: defaultCampaignRange.to,
+        };
+      }
+
+      return current.campaignId
+        ? {
+            ...current,
+            campaignId: "",
+          }
+        : current;
+    });
+  }, [
+    campaigns,
+    defaultCampaignRange.campaignId,
+    defaultCampaignRange.from,
+    defaultCampaignRange.to,
+    resolvedDefaultCampaignId,
   ]);
 
   // Filtros
@@ -588,21 +874,29 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       matchesDateRange(entry, filters.from, filters.to),
   );
 
-  const allClientOptions = Array.from(
-    new Set(entries.map((entry) => entry.client).filter(Boolean)),
-  ).sort();
-  const allProductOptions = Array.from(
-    new Set(entries.map((entry) => entry.product).filter(Boolean)),
-  ).sort();
-  const allSupplierOptions = Array.from(
-    new Set(entries.map((entry) => entry.supplier).filter(Boolean)),
-  ).sort();
-  const allProcessOptions = Array.from(
-    new Set(entries.map((entry) => entry.processCode).filter(Boolean)),
-  ).sort();
-  const allAnalysisCodes = Array.from(
-    new Set(entries.map((entry) => entry.analysisCode).filter(Boolean)),
-  ).sort();
+  const formRelationSeeds = relationalSeeds.length
+    ? relationalSeeds
+    : buildNaturalRelationalSeeds(entries);
+  const allClientOptions = getSortedTextOptions([
+    ...entries.map((entry) => entry.client),
+    ...formRelationSeeds.map((seed) => seed.client),
+  ]);
+  const allProductOptions = getSortedTextOptions([
+    ...entries.map((entry) => entry.product),
+    ...formRelationSeeds.map((seed) => seed.product),
+  ]);
+  const allSupplierOptions = getSortedTextOptions([
+    ...entries.map((entry) => entry.supplier),
+    ...formRelationSeeds.map((seed) => seed.supplier),
+  ]);
+  const allProcessOptions = getSortedTextOptions([
+    ...entries.map((entry) => entry.processCode),
+    ...formRelationSeeds.map((seed) => seed.processCode),
+  ]);
+  const allAnalysisCodes = getSortedTextOptions([
+    ...entries.map((entry) => entry.analysisCode),
+    ...formRelationSeeds.map((seed) => seed.analysisReference),
+  ]);
   const formRelations: NaturalFormRelations = {
     client: form.client,
     supplier: form.supplier,
@@ -611,35 +905,34 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     analysisCode: form.analysisCode,
   };
   const formClientOptions = getRelationalOptions(
-    entries,
+    formRelationSeeds,
     formRelations,
     "client",
-    naturalFormRelationConfig,
+    naturalSharedFormRelationConfig,
   );
   const formSupplierOptions = getRelationalOptions(
-    entries,
+    formRelationSeeds,
     formRelations,
     "supplier",
-    naturalFormRelationConfig,
+    naturalSharedFormRelationConfig,
   );
   const formProductOptions = getRelationalOptions(
-    entries,
+    formRelationSeeds,
     formRelations,
     "product",
-    naturalFormRelationConfig,
+    naturalSharedFormRelationConfig,
   );
   const formProcessOptions = getRelationalOptions(
-    entries,
+    formRelationSeeds,
     formRelations,
     "processCode",
-    naturalFormRelationConfig,
+    naturalSharedFormRelationConfig,
   );
   const formAnalysisOptions = getRelationalOptions(
-    entries,
+    formRelationSeeds,
     formRelations,
     "analysisCode",
-    naturalFormRelationConfig,
-    (entry) => entry.withAnalysis,
+    naturalSharedFormRelationConfig,
   );
   const packagingSuggestionEntries = entries.filter((entry) => {
     const matchesClient = !form.client || entry.client === form.client;
@@ -736,7 +1029,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   ]);
 
   // Historial
-  const filteredEntries = entries.filter((entry) => {
+  const searchScopedEntries = entries.filter((entry) => {
     const matchesClient = !filters.client || entry.client === filters.client;
     const matchesSupplier =
       !filters.supplier || entry.supplier === filters.supplier;
@@ -760,6 +1053,14 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       matchesDateRange(entry, filters.from, filters.to)
     );
   });
+  const searchSuggestions = getSearchSuggestions(
+    searchScopedEntries,
+    filters.search,
+    naturalSearchConfig,
+  );
+  const filteredEntries = searchScopedEntries.filter((entry) =>
+    matchesSearchTerm(entry, filters.search, naturalSearchConfig),
+  );
 
   useEffect(() => {
     if (!filteredEntries.length) {
@@ -792,6 +1093,10 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     (entry) => entry.withAnalysis,
   ).length;
   const selectedFilterItems: PdfExportFilterItem[] = [
+    {
+      label: "Campaña",
+      value: getCampaignDisplayName(campaigns, filters.campaignId),
+    },
     { label: "Cliente", value: filters.client },
     { label: "Proveedor", value: filters.supplier },
     { label: "Proceso", value: filters.processCode },
@@ -799,11 +1104,12 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     { label: "Envase", value: filters.packagingId },
     { label: "Desde", value: filters.from ? formatDate(filters.from) : "" },
     { label: "Hasta", value: filters.to ? formatDate(filters.to) : "" },
+    { label: "Busqueda", value: filters.search.trim() },
     ...(filters.onlyWithAnalysis
       ? [{ label: "Analisis", value: "Solo con analisis" }]
       : []),
   ].filter((item) => item.value);
-  const pdfEntryPages = chunkPdfItems(sortedEntries);
+  const pdfEntryPages = chunkPdfItems(sortedEntries, 4);
   const availableBreakdownYears = Array.from(
     new Set(
       filteredEntries
@@ -850,6 +1156,8 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     .map(([name, netKg]) => ({ name, netKg }))
     .sort((left, right) => right.netKg - left.netKg);
   const breakdownTitle = `Toneladas por ${naturalBreakdownLabelMap[breakdownGroup]}`;
+  const breakdownChartHeight = getBreakdownChartHeight(inboundBreakdownData);
+  const breakdownAxisWidth = getBreakdownAxisWidth(inboundBreakdownData);
 
   const activeMonth = parseMonthKey(activeMonthKey) ?? {
     year: Number(getTodayInBuenosAires().slice(0, 4)),
@@ -944,7 +1252,28 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     field: keyof typeof filters,
     value: string | boolean,
   ) => {
-    setFilters((current) => ({ ...current, [field]: value }));
+    setFilters((current) => {
+      if (field === "campaignId") {
+        const nextCampaignRange = getCampaignRange(campaigns, String(value));
+
+        return {
+          ...current,
+          campaignId: nextCampaignRange.campaignId,
+          from: nextCampaignRange.from,
+          to: nextCampaignRange.to,
+        };
+      }
+
+      if (field === "from" || field === "to") {
+        return {
+          ...current,
+          campaignId: "",
+          [field]: String(value),
+        };
+      }
+
+      return { ...current, [field]: value };
+    });
   };
 
   const handleFormChange = (
@@ -1029,7 +1358,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
         }
 
         if (field === "packagingType") {
-          const newPackagingType = normalizePackagingText(String(value));
+          const newPackagingType = String(value).toUpperCase();
 
           return {
             ...movement,
@@ -1046,7 +1375,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
 
         return {
           ...movement,
-          [field]: normalizePackagingText(String(value)),
+          [field]: String(value).toUpperCase(),
         };
       }),
     }));
@@ -1066,14 +1395,14 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
         analysisCode: current.analysisCode,
       };
       const autofilledRelations = autofillUniqueRelationalSelections(
-        entries,
+        formRelationSeeds,
         currentRelations,
-        naturalFormRelationConfig,
-        current.withAnalysis ? (entry) => entry.withAnalysis : undefined,
+        naturalSharedFormRelationConfig,
       );
       const nextForm = {
         ...current,
         ...autofilledRelations,
+        analysisCode: current.withAnalysis ? autofilledRelations.analysisCode : "",
       };
       const changed = !areStringFiltersEqual(
         currentRelations,
@@ -1084,7 +1413,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
     });
   }, [
     isModalOpen,
-    entries,
+    formRelationSeeds,
     form.client,
     form.supplier,
     form.product,
@@ -1394,6 +1723,15 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
   // Vista
   return (
     <div className="module-stack">
+      <ModuleSearchToolbar
+        value={filters.search}
+        onChange={(value) => handleFilterChange("search", value)}
+        suggestions={searchSuggestions}
+        placeholder="Buscar cliente, procedencia, producto, proceso, analisis, carta o envase"
+        resultCount={filteredEntries.length}
+        totalCount={searchScopedEntries.length}
+      />
+
       <div className="metric-grid samples-metric-grid">
         <MetricCard
           label="Registro de descargas"
@@ -1440,13 +1778,15 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
               className="text-button"
               onClick={() =>
                 setFilters({
+                  campaignId: defaultCampaignRange.campaignId,
+                  search: "",
                   client: "",
                   supplier: "",
                   product: "",
                   processCode: "",
                   packagingId: "",
-                  from: "",
-                  to: "",
+                  from: defaultCampaignRange.from,
+                  to: defaultCampaignRange.to,
                   onlyWithAnalysis: false,
                 })
               }
@@ -1459,6 +1799,26 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
       >
         {areFiltersVisible ? (
           <div className="samples-filters-bar natural-filters-bar">
+            <label className="samples-filter-field">
+              Campaña
+              <select
+                value={filters.campaignId}
+                onChange={(event) =>
+                  handleFilterChange("campaignId", event.target.value)
+                }
+              >
+                <option value="">Personalizada</option>
+                {campaigns.map((campaign) => (
+                  <option key={campaign.id} value={campaign.id}>
+                    {campaign.name}
+                    {campaign.id === resolvedDefaultCampaignId
+                      ? " | Predeterminada"
+                      : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <label className="samples-filter-field">
               Cliente
               <select
@@ -1691,7 +2051,10 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
             </div>
           }
         >
-          <div className="chart-shell natural-chart-shell">
+          <div
+            className="chart-shell natural-chart-shell"
+            style={{ height: `${breakdownChartHeight}px` }}
+          >
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={inboundBreakdownData}
@@ -1711,8 +2074,10 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
                 <YAxis
                   type="category"
                   dataKey="name"
-                  width={110}
+                  width={breakdownAxisWidth}
                   stroke={chartAxisColor}
+                  interval={0}
+                  tick={renderBreakdownYAxisTick}
                 />
                 <Tooltip
                   formatter={(value: number) => [
@@ -1837,7 +2202,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
 
                   <PdfHistoryCardsSection
                     title="Registro de descargas"
-                    listClassName="samples-inventory-list"
+                    listClassName="samples-inventory-list pdf-export-history-list--quad"
                   >
                     {entriesPage.map((entry) =>
                       renderEntryRecord(entry, {
@@ -1872,7 +2237,7 @@ export const NaturalModule = ({ dataMode = "live" }: NaturalModuleProps) => {
 
                 <PdfHistoryCardsSection
                   title="Registro de descargas"
-                  listClassName="samples-inventory-list"
+                  listClassName="samples-inventory-list pdf-export-history-list--quad"
                 >
                   <div className="samples-empty-state">
                     <strong>Sin descargas para esta vista</strong>

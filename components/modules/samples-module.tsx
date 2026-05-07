@@ -28,6 +28,7 @@ import {
   X,
 } from "lucide-react";
 
+import { ModuleSearchToolbar } from "@/components/dashboard/module-search-toolbar";
 import { MetricCard, SectionCard } from "@/components/dashboard/primitives";
 import {
   chunkPdfItems,
@@ -61,8 +62,23 @@ import {
   type RelationalFieldConfig,
 } from "@/lib/relational-filters";
 import type { DashboardDataMode } from "@/lib/dashboard-data-mode";
+import { buildSampleRelationalSeeds } from "@/lib/dashboard-relational-seeds";
+import {
+  getCampaignDisplayName,
+  getCampaignRange,
+  getDefaultCampaignId,
+} from "@/lib/module-campaigns";
+import {
+  getSearchSuggestions,
+  matchesSearchTerm,
+  type SearchFieldConfig,
+} from "@/lib/module-search";
 import { createDemoSamples } from "@/lib/demo-data";
-import type { StoredSample } from "@/types/domain";
+import type {
+  DashboardCampaign,
+  DashboardRelationalSeed,
+  StoredSample,
+} from "@/types/domain";
 
 // Configuracion
 const chartColors = [
@@ -171,6 +187,11 @@ const formFromSample = (sample: StoredSample): Omit<StoredSample, "id"> => ({
 const normalizeUppercaseValue = (value: string) =>
   value.replace(/\s+/g, " ").replace(/^\s+/, "").toUpperCase();
 
+const getSortedTextOptions = (values: Array<string | null | undefined>) =>
+  Array.from(
+    new Set(values.map((value) => value?.trim() ?? "").filter(Boolean)),
+  ).sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" }));
+
 const normalizeStoredSample = (
   recordId: string,
   sample: Partial<StoredSample>,
@@ -266,24 +287,107 @@ const sampleFormRelationConfig: Record<
   },
 };
 
+const sampleSharedFormRelationConfig: Record<
+  keyof SampleFormRelations,
+  RelationalFieldConfig<DashboardRelationalSeed>
+> = {
+  client: {
+    getValues: (seed) => [seed.client],
+    matches: (seed, value) => seed.client === value,
+  },
+  supplier: {
+    getValues: (seed) => [seed.supplier],
+    matches: (seed, value) => seed.supplier === value,
+  },
+  product: {
+    getValues: (seed) => [seed.product],
+    matches: (seed, value) => seed.product === value,
+  },
+  processCode: {
+    getValues: (seed) => [seed.processCode],
+    matches: (seed, value) => seed.processCode === value,
+  },
+  relatedAnalysisId: {
+    getValues: (seed) => [seed.analysisReference],
+    matches: (seed, value) => seed.analysisReference === value,
+  },
+};
+
+const sampleSearchConfig: Record<string, SearchFieldConfig<StoredSample>> = {
+  client: {
+    label: "Cliente",
+    getValues: (sample) => [sample.client],
+  },
+  supplier: {
+    label: "Procedencia",
+    getValues: (sample) => [sample.supplier],
+  },
+  product: {
+    label: "Producto",
+    getValues: (sample) => [sample.product],
+  },
+  processCode: {
+    label: "Proceso",
+    getValues: (sample) => [sample.processCode],
+  },
+  sampleCode: {
+    label: "Codigo de muestra",
+    getValues: (sample) => [sample.sampleCode],
+  },
+  relatedAnalysisId: {
+    label: "Analisis relacionado",
+    getValues: (sample) => [sample.relatedAnalysisId],
+  },
+  warehouseZone: {
+    label: "Zona",
+    getValues: (sample) => [sample.warehouseZone],
+  },
+  shelf: {
+    label: "Estante",
+    getValues: (sample) => [sample.shelf],
+  },
+  status: {
+    label: "Estado",
+    getValues: (sample) => [getSampleStatus(sample)],
+  },
+};
+
 interface SamplesModuleProps {
   dataMode?: DashboardDataMode;
+  campaigns: DashboardCampaign[];
+  defaultCampaignId: string;
+  relationalSeeds: DashboardRelationalSeed[];
 }
 
 // Modulo
 export const SamplesModule = ({
   dataMode = "live",
+  campaigns,
+  defaultCampaignId,
+  relationalSeeds,
 }: SamplesModuleProps) => {
   const isDemoMode = dataMode === "demo";
+  const resolvedDefaultCampaignId = getDefaultCampaignId(
+    campaigns,
+    defaultCampaignId,
+  );
+  const defaultCampaignRange = getCampaignRange(
+    campaigns,
+    resolvedDefaultCampaignId,
+  );
   const [samples, setSamples] = useState<StoredSample[]>(() =>
     isDemoMode ? createDemoSamples() : [],
   );
   const [filters, setFilters] = useState({
+    campaignId: defaultCampaignRange.campaignId,
+    search: "",
     client: "",
     supplier: "",
     product: "",
     processCode: "",
     status: "",
+    from: defaultCampaignRange.from,
+    to: defaultCampaignRange.to,
   });
   const [areFiltersVisible, setAreFiltersVisible] = useState(false);
   const [form, setForm] = useState(createEmptyForm);
@@ -368,11 +472,63 @@ export const SamplesModule = ({
   useEffect(() => {
     setCurrentPage(1);
   }, [
+    filters.campaignId,
+    filters.search,
     filters.client,
     filters.supplier,
     filters.product,
     filters.processCode,
     filters.status,
+    filters.from,
+    filters.to,
+  ]);
+
+  useEffect(() => {
+    setFilters((current) => {
+      if (current.campaignId) {
+        const selectedCampaignRange = getCampaignRange(
+          campaigns,
+          current.campaignId,
+        );
+
+        if (selectedCampaignRange.campaignId) {
+          if (
+            current.from === selectedCampaignRange.from &&
+            current.to === selectedCampaignRange.to
+          ) {
+            return current;
+          }
+
+          return {
+            ...current,
+            from: selectedCampaignRange.from,
+            to: selectedCampaignRange.to,
+          };
+        }
+      }
+
+      if (!current.from && !current.to && resolvedDefaultCampaignId) {
+        return {
+          ...current,
+          campaignId: defaultCampaignRange.campaignId,
+          from: defaultCampaignRange.from,
+          to: defaultCampaignRange.to,
+        };
+      }
+
+      return current.campaignId
+        ? {
+            ...current,
+            campaignId: "",
+          }
+        : current;
+    });
+  }, [
+    campaigns,
+    defaultCampaignRange.campaignId,
+    defaultCampaignRange.from,
+    defaultCampaignRange.to,
+    resolvedDefaultCampaignId,
   ]);
 
   // Filtros
@@ -384,51 +540,75 @@ export const SamplesModule = ({
     status: filters.status,
   };
 
-  const allClientOptions = Array.from(
-    new Set(samples.map((sample) => sample.client)),
-  ).sort();
-  const allSupplierOptions = Array.from(
-    new Set(samples.map((sample) => sample.supplier)),
-  ).sort();
-  const allProductOptions = Array.from(
-    new Set(samples.map((sample) => sample.product)),
-  ).sort();
-  const allProcessOptions = Array.from(
-    new Set(samples.map((sample) => sample.processCode)),
-  ).sort();
-  const allRelatedAnalysisOptions = Array.from(
-    new Set(samples.map((sample) => sample.relatedAnalysisId).filter(Boolean)),
-  ).sort();
+  const matchesStoredDateRange = (
+    sample: StoredSample,
+    from: string,
+    to: string,
+  ) => {
+    const matchesFrom = !from || sample.storedAt >= from;
+    const matchesTo = !to || sample.storedAt <= to;
+
+    return matchesFrom && matchesTo;
+  };
+
+  const formRelationSeeds = relationalSeeds.length
+    ? relationalSeeds
+    : buildSampleRelationalSeeds(samples);
+  const allClientOptions = getSortedTextOptions([
+    ...samples.map((sample) => sample.client),
+    ...formRelationSeeds.map((seed) => seed.client),
+  ]);
+  const allSupplierOptions = getSortedTextOptions([
+    ...samples.map((sample) => sample.supplier),
+    ...formRelationSeeds.map((seed) => seed.supplier),
+  ]);
+  const allProductOptions = getSortedTextOptions([
+    ...samples.map((sample) => sample.product),
+    ...formRelationSeeds.map((seed) => seed.product),
+  ]);
+  const allProcessOptions = getSortedTextOptions([
+    ...samples.map((sample) => sample.processCode),
+    ...formRelationSeeds.map((seed) => seed.processCode),
+  ]);
+  const allRelatedAnalysisOptions = getSortedTextOptions([
+    ...samples.map((sample) => sample.relatedAnalysisId),
+    ...formRelationSeeds.map((seed) => seed.analysisReference),
+  ]);
 
   const clientOptions = getRelationalOptions(
     samples,
     relationalFilters,
     "client",
     sampleFilterConfig,
+    (sample) => matchesStoredDateRange(sample, filters.from, filters.to),
   );
   const productOptions = getRelationalOptions(
     samples,
     relationalFilters,
     "product",
     sampleFilterConfig,
+    (sample) => matchesStoredDateRange(sample, filters.from, filters.to),
   );
   const supplierOptions = getRelationalOptions(
     samples,
     relationalFilters,
     "supplier",
     sampleFilterConfig,
+    (sample) => matchesStoredDateRange(sample, filters.from, filters.to),
   );
   const processOptions = getRelationalOptions(
     samples,
     relationalFilters,
     "processCode",
     sampleFilterConfig,
+    (sample) => matchesStoredDateRange(sample, filters.from, filters.to),
   );
   const statusOptions = getRelationalOptions(
     samples,
     relationalFilters,
     "status",
     sampleFilterConfig,
+    (sample) => matchesStoredDateRange(sample, filters.from, filters.to),
   );
 
   const formRelations: SampleFormRelations = {
@@ -439,34 +619,34 @@ export const SamplesModule = ({
     relatedAnalysisId: form.relatedAnalysisId,
   };
   const formClientOptions = getRelationalOptions(
-    samples,
+    formRelationSeeds,
     formRelations,
     "client",
-    sampleFormRelationConfig,
+    sampleSharedFormRelationConfig,
   );
   const formSupplierOptions = getRelationalOptions(
-    samples,
+    formRelationSeeds,
     formRelations,
     "supplier",
-    sampleFormRelationConfig,
+    sampleSharedFormRelationConfig,
   );
   const formProductOptions = getRelationalOptions(
-    samples,
+    formRelationSeeds,
     formRelations,
     "product",
-    sampleFormRelationConfig,
+    sampleSharedFormRelationConfig,
   );
   const formProcessOptions = getRelationalOptions(
-    samples,
+    formRelationSeeds,
     formRelations,
     "processCode",
-    sampleFormRelationConfig,
+    sampleSharedFormRelationConfig,
   );
   const formRelatedAnalysisOptions = getRelationalOptions(
-    samples,
+    formRelationSeeds,
     formRelations,
     "relatedAnalysisId",
-    sampleFormRelationConfig,
+    sampleSharedFormRelationConfig,
   );
 
   useEffect(() => {
@@ -482,6 +662,7 @@ export const SamplesModule = ({
         samples,
         currentRelational,
         sampleFilterConfig,
+        (sample) => matchesStoredDateRange(sample, current.from, current.to),
       );
 
       if (areStringFiltersEqual(currentRelational, sanitizedRelational)) {
@@ -500,10 +681,12 @@ export const SamplesModule = ({
     filters.product,
     filters.processCode,
     filters.status,
+    filters.from,
+    filters.to,
   ]);
 
   // Historial
-  const filteredSamples = samples.filter((sample) => {
+  const searchScopedSamples = samples.filter((sample) => {
     const matchesClient = !filters.client || sample.client === filters.client;
     const matchesSupplier =
       !filters.supplier || sample.supplier === filters.supplier;
@@ -519,9 +702,18 @@ export const SamplesModule = ({
       matchesSupplier &&
       matchesProduct &&
       matchesProcess &&
-      matchesStatus
+      matchesStatus &&
+      matchesStoredDateRange(sample, filters.from, filters.to)
     );
   });
+  const searchSuggestions = getSearchSuggestions(
+    searchScopedSamples,
+    filters.search,
+    sampleSearchConfig,
+  );
+  const filteredSamples = searchScopedSamples.filter((sample) =>
+    matchesSearchTerm(sample, filters.search, sampleSearchConfig),
+  );
 
   const sortedFilteredSamples = [...filteredSamples].sort((left, right) => {
     const byDate = right.storedAt.localeCompare(left.storedAt);
@@ -550,13 +742,20 @@ export const SamplesModule = ({
     return sample.retentionUntil >= today && sample.retentionUntil <= expiringSoonLimit;
   }).length;
   const selectedFilterItems: PdfExportFilterItem[] = [
+    {
+      label: "Campaña",
+      value: getCampaignDisplayName(campaigns, filters.campaignId),
+    },
     { label: "Cliente", value: filters.client },
     { label: "Proveedor", value: filters.supplier },
     { label: "Producto", value: filters.product },
     { label: "Proceso", value: filters.processCode },
     { label: "Estado", value: filters.status },
+    { label: "Desde", value: filters.from ? formatDate(filters.from) : "" },
+    { label: "Hasta", value: filters.to ? formatDate(filters.to) : "" },
+    { label: "Busqueda", value: filters.search.trim() },
   ].filter((item) => item.value);
-  const pdfSamplePages = chunkPdfItems(sortedFilteredSamples);
+  const pdfSamplePages = chunkPdfItems(sortedFilteredSamples, 4);
 
   const productMap = new Map<string, { count: number; totalKg: number }>();
   const statusMap = new Map<StoredSample["status"], number>([
@@ -704,7 +903,28 @@ export const SamplesModule = ({
   };
 
   const handleFilterChange = (field: keyof typeof filters, value: string) => {
-    setFilters((current) => ({ ...current, [field]: value }));
+    setFilters((current) => {
+      if (field === "campaignId") {
+        const nextCampaignRange = getCampaignRange(campaigns, value);
+
+        return {
+          ...current,
+          campaignId: nextCampaignRange.campaignId,
+          from: nextCampaignRange.from,
+          to: nextCampaignRange.to,
+        };
+      }
+
+      if (field === "from" || field === "to") {
+        return {
+          ...current,
+          campaignId: "",
+          [field]: value,
+        };
+      }
+
+      return { ...current, [field]: value };
+    });
   };
 
   const handleFormChange = (
@@ -755,9 +975,9 @@ export const SamplesModule = ({
         relatedAnalysisId: current.relatedAnalysisId,
       };
       const autofilledRelations = autofillUniqueRelationalSelections(
-        samples,
+        formRelationSeeds,
         currentRelations,
-        sampleFormRelationConfig,
+        sampleSharedFormRelationConfig,
       );
       const nextForm = {
         ...current,
@@ -772,7 +992,7 @@ export const SamplesModule = ({
     });
   }, [
     isModalOpen,
-    samples,
+    formRelationSeeds,
     form.client,
     form.supplier,
     form.product,
@@ -1150,6 +1370,15 @@ export const SamplesModule = ({
   // Panel
   return (
     <div className="module-stack">
+      <ModuleSearchToolbar
+        value={filters.search}
+        onChange={(value) => handleFilterChange("search", value)}
+        suggestions={searchSuggestions}
+        placeholder="Buscar cliente, procedencia, producto, proceso, muestra, analisis o ubicacion"
+        resultCount={filteredSamples.length}
+        totalCount={searchScopedSamples.length}
+      />
+
       <div className="metric-grid samples-metric-grid">
         <MetricCard
           label="Total muestras activas"
@@ -1196,11 +1425,15 @@ export const SamplesModule = ({
               className="text-button"
               onClick={() =>
                 setFilters({
+                  campaignId: defaultCampaignRange.campaignId,
+                  search: "",
                   client: "",
                   supplier: "",
                   product: "",
                   processCode: "",
                   status: "",
+                  from: defaultCampaignRange.from,
+                  to: defaultCampaignRange.to,
                 })
               }
             >
@@ -1212,6 +1445,26 @@ export const SamplesModule = ({
       >
         {areFiltersVisible ? (
           <div className="samples-filters-bar">
+            <label className="samples-filter-field">
+              Campaña
+              <select
+                value={filters.campaignId}
+                onChange={(event) =>
+                  handleFilterChange("campaignId", event.target.value)
+                }
+              >
+                <option value="">Personalizada</option>
+                {campaigns.map((campaign) => (
+                  <option key={campaign.id} value={campaign.id}>
+                    {campaign.name}
+                    {campaign.id === resolvedDefaultCampaignId
+                      ? " | Predeterminada"
+                      : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <label className="samples-filter-field">
               Cliente
               <select
@@ -1295,6 +1548,28 @@ export const SamplesModule = ({
                   </option>
                 ))}
               </select>
+            </label>
+
+            <label className="samples-filter-field">
+              Desde
+              <input
+                type="date"
+                value={filters.from}
+                onChange={(event) =>
+                  handleFilterChange("from", event.target.value)
+                }
+              />
+            </label>
+
+            <label className="samples-filter-field">
+              Hasta
+              <input
+                type="date"
+                value={filters.to}
+                onChange={(event) =>
+                  handleFilterChange("to", event.target.value)
+                }
+              />
             </label>
           </div>
         ) : null}
@@ -1460,7 +1735,7 @@ export const SamplesModule = ({
                   <PdfHistoryCardsSection
                     title="Inventario reciente"
                     className="samples-inventory-card"
-                    listClassName="samples-inventory-list"
+                    listClassName="samples-inventory-list pdf-export-history-list--quad"
                   >
                     {samplesPage.map((sample) =>
                       renderSampleRecord(sample, {
@@ -1496,7 +1771,7 @@ export const SamplesModule = ({
                 <PdfHistoryCardsSection
                   title="Inventario reciente"
                   className="samples-inventory-card"
-                  listClassName="samples-inventory-list"
+                  listClassName="samples-inventory-list pdf-export-history-list--quad"
                 >
                   <div className="samples-empty-state">
                     <strong>Sin resultados para esta vista</strong>

@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 
+import { ModuleSearchToolbar } from "@/components/dashboard/module-search-toolbar";
 import { MetricCard, SectionCard } from "@/components/dashboard/primitives";
 import {
   chunkPdfItems,
@@ -69,8 +70,24 @@ import {
   type RelationalFieldConfig,
 } from "@/lib/relational-filters";
 import type { DashboardDataMode } from "@/lib/dashboard-data-mode";
+import { buildDefectRelationalSeeds } from "@/lib/dashboard-relational-seeds";
+import {
+  getCampaignDisplayName,
+  getCampaignRange,
+  getDefaultCampaignId,
+} from "@/lib/module-campaigns";
+import {
+  getSearchSuggestions,
+  matchesSearchTerm,
+  type SearchFieldConfig,
+} from "@/lib/module-search";
 import { createDemoDefectAnalyses } from "@/lib/demo-data";
-import type { DefectAnalysis, DefectItem } from "@/types/domain";
+import type {
+  DashboardCampaign,
+  DashboardRelationalSeed,
+  DefectAnalysis,
+  DefectItem,
+} from "@/types/domain";
 
 // Configuracion
 const chartColors = [
@@ -112,6 +129,8 @@ type DefectFormState = {
 };
 
 type DefectFilters = {
+  campaignId: string;
+  search: string;
   client: string;
   supplier: string;
   processCode: string;
@@ -132,10 +151,13 @@ type ProcessAverageDatum = {
   grams: number;
 };
 
+type TrendSeriesMode = "defect" | "gramaje" | "both";
+
 type EvolutionPoint = {
   date: string;
   day: string;
-  grams: number;
+  defectGrams: number | null;
+  gramajeHundredths: number | null;
 };
 
 // Filtros
@@ -477,25 +499,110 @@ const formRelationConfig = {
   RelationalFieldConfig<DefectAnalysis>
 >;
 
+const sharedFormRelationConfig = {
+  client: {
+    getValues: (seed: DashboardRelationalSeed) => [seed.client],
+    matches: (seed: DashboardRelationalSeed, value: string) =>
+      seed.client === value,
+  },
+  supplier: {
+    getValues: (seed: DashboardRelationalSeed) => [seed.supplier],
+    matches: (seed: DashboardRelationalSeed, value: string) =>
+      seed.supplier === value,
+  },
+  processCode: {
+    getValues: (seed: DashboardRelationalSeed) => [seed.processCode],
+    matches: (seed: DashboardRelationalSeed, value: string) =>
+      seed.processCode === value,
+  },
+  product: {
+    getValues: (seed: DashboardRelationalSeed) => [seed.product],
+    matches: (seed: DashboardRelationalSeed, value: string) =>
+      seed.product === value,
+  },
+} satisfies Record<
+  "client" | "supplier" | "processCode" | "product",
+  RelationalFieldConfig<DashboardRelationalSeed>
+>;
+
+const defectsSearchConfig: Record<string, SearchFieldConfig<DefectAnalysis>> = {
+  client: {
+    label: "Cliente",
+    getValues: (analysis) => [analysis.client],
+  },
+  supplier: {
+    label: "Procedencia",
+    getValues: (analysis) => [analysis.supplier],
+  },
+  product: {
+    label: "Producto",
+    getValues: (analysis) => [analysis.product],
+  },
+  processCode: {
+    label: "Proceso",
+    getValues: (analysis) => [analysis.processCode],
+  },
+  outputStage: {
+    label: "Salida",
+    getValues: (analysis) => [analysis.outputStage],
+  },
+  relatedAnalysis: {
+    label: "Analisis relacionado",
+    getValues: (analysis) => [analysis.relatedAnalysis],
+  },
+  defect: {
+    label: "Defecto",
+    getValues: (analysis) =>
+      analysis.defects.map((defect) =>
+        formatDefectLabel(defect.name, defect.detail),
+      ),
+  },
+  gramaje: {
+    label: "Gramaje",
+    getValues: (analysis) =>
+      analysis.gramajeHundredths != null && analysis.gramajeHundredths > 0
+        ? [String(analysis.gramajeHundredths)]
+        : [],
+  },
+};
+
 interface DefectsModuleProps {
   dataMode?: DashboardDataMode;
+  campaigns: DashboardCampaign[];
+  defaultCampaignId: string;
+  relationalSeeds: DashboardRelationalSeed[];
 }
 
 // Modulo
-export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
+export const DefectsModule = ({
+  dataMode = "live",
+  campaigns,
+  defaultCampaignId,
+  relationalSeeds,
+}: DefectsModuleProps) => {
   const isDemoMode = dataMode === "demo";
+  const resolvedDefaultCampaignId = getDefaultCampaignId(
+    campaigns,
+    defaultCampaignId,
+  );
+  const defaultCampaignRange = getCampaignRange(
+    campaigns,
+    resolvedDefaultCampaignId,
+  );
   const [analyses, setAnalyses] = useState<DefectAnalysis[]>(() =>
     isDemoMode ? createDemoDefectAnalyses().sort(sortAnalysesByRecency) : [],
   );
   const [filters, setFilters] = useState<DefectFilters>({
+    campaignId: defaultCampaignRange.campaignId,
+    search: "",
     client: "",
     supplier: "",
     processCode: "",
     product: "",
     outputStage: "",
     defect: "",
-    from: "",
-    to: "",
+    from: defaultCampaignRange.from,
+    to: defaultCampaignRange.to,
   });
   const [areFiltersVisible, setAreFiltersVisible] = useState(false);
   const [form, setForm] = useState<DefectFormState>(createEmptyForm);
@@ -505,6 +612,8 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [activeProcessChart, setActiveProcessChart] = useState("");
   const [activeDefectChart, setActiveDefectChart] = useState("");
+  const [activeTrendView, setActiveTrendView] =
+    useState<TrendSeriesMode>("defect");
   const [activeTrendMonth, setActiveTrendMonth] = useState(() =>
     getMonthKey(getTodayInBuenosAires()),
   );
@@ -582,6 +691,8 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   useEffect(() => {
     setCurrentPage(1);
   }, [
+    filters.campaignId,
+    filters.search,
     filters.client,
     filters.supplier,
     filters.processCode,
@@ -590,6 +701,54 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     filters.defect,
     filters.from,
     filters.to,
+  ]);
+
+  useEffect(() => {
+    setFilters((current) => {
+      if (current.campaignId) {
+        const selectedCampaignRange = getCampaignRange(
+          campaigns,
+          current.campaignId,
+        );
+
+        if (selectedCampaignRange.campaignId) {
+          if (
+            current.from === selectedCampaignRange.from &&
+            current.to === selectedCampaignRange.to
+          ) {
+            return current;
+          }
+
+          return {
+            ...current,
+            from: selectedCampaignRange.from,
+            to: selectedCampaignRange.to,
+          };
+        }
+      }
+
+      if (!current.from && !current.to && resolvedDefaultCampaignId) {
+        return {
+          ...current,
+          campaignId: defaultCampaignRange.campaignId,
+          from: defaultCampaignRange.from,
+          to: defaultCampaignRange.to,
+        };
+      }
+
+      return current.campaignId
+        ? {
+            ...current,
+            campaignId: "",
+          }
+        : current;
+    });
+  }, [
+    campaigns,
+    defaultCampaignRange.campaignId,
+    defaultCampaignRange.from,
+    defaultCampaignRange.to,
+    resolvedDefaultCampaignId,
   ]);
 
   // Filtros
@@ -689,7 +848,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   ]);
 
   // Historial
-  const filteredAnalyses = analyses.filter((analysis) => {
+  const searchScopedAnalyses = analyses.filter((analysis) => {
     const matchesClient = !filters.client || analysis.client === filters.client;
     const matchesSupplier =
       !filters.supplier || analysis.supplier === filters.supplier;
@@ -716,6 +875,14 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
       matchesDateRange(analysis, filters.from, filters.to)
     );
   });
+  const searchSuggestions = getSearchSuggestions(
+    searchScopedAnalyses,
+    filters.search,
+    defectsSearchConfig,
+  );
+  const filteredAnalyses = searchScopedAnalyses.filter((analysis) =>
+    matchesSearchTerm(analysis, filters.search, defectsSearchConfig),
+  );
 
   const sortedFilteredAnalyses = [...filteredAnalyses].sort(
     sortAnalysesByRecency,
@@ -762,6 +929,10 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   const averageGramajeHundredths =
     gramajeCount > 0 ? gramajeTotal / gramajeCount : 0;
   const selectedFilterItems: PdfExportFilterItem[] = [
+    {
+      label: "Campaña",
+      value: getCampaignDisplayName(campaigns, filters.campaignId),
+    },
     { label: "Cliente", value: filters.client },
     { label: "Proveedor", value: filters.supplier },
     { label: "Proceso", value: filters.processCode },
@@ -770,6 +941,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     { label: "Defecto", value: filters.defect },
     { label: "Desde", value: filters.from ? formatDate(filters.from) : "" },
     { label: "Hasta", value: filters.to ? formatDate(filters.to) : "" },
+    { label: "Busqueda", value: filters.search.trim() },
   ].filter((item) => item.value);
   const pdfAnalysisPages = chunkPdfItems(sortedFilteredAnalyses);
   const totalDefectGrams = filteredAnalyses.reduce(
@@ -818,7 +990,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     : 0;
 
   const processScopedAnalyses = activeProcessChart
-    ? analyses
+    ? filteredAnalyses
         .filter((analysis) => analysis.processCode === activeProcessChart)
         .sort(sortAnalysesByRecency)
     : [];
@@ -895,32 +1067,62 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     }
   }, [activeTrendMonth, processScopedAnalyses]);
 
-  const evolutionMap = new Map<string, number[]>();
+  const requiresDefectSelection =
+    activeTrendView === "defect" || activeTrendView === "both";
+  const canRenderDefectTrend =
+    !requiresDefectSelection || Boolean(activeDefectChart);
+  const shouldIncludeDefectTrend =
+    activeTrendView !== "gramaje" && Boolean(activeDefectChart);
+  const shouldIncludeGramajeTrend = activeTrendView !== "defect";
+  const evolutionMap = new Map<
+    string,
+    { defectValues: number[]; gramajeValues: number[] }
+  >();
   processScopedAnalyses.forEach((analysis) => {
-    if (
-      !activeDefectChart ||
-      getMonthKey(analysis.analysisDate) !== activeTrendMonth
-    ) {
+    if (getMonthKey(analysis.analysisDate) !== activeTrendMonth) {
       return;
     }
 
-    analysis.defects.forEach((defect) => {
-      const label = formatDefectLabel(defect.name, defect.detail);
-      if (label !== activeDefectChart) {
-        return;
-      }
+    const dailyValues = evolutionMap.get(analysis.analysisDate) ?? {
+      defectValues: [],
+      gramajeValues: [],
+    };
 
-      const values = evolutionMap.get(analysis.analysisDate) ?? [];
-      values.push(defect.grams);
-      evolutionMap.set(analysis.analysisDate, values);
-    });
+    if (
+      shouldIncludeGramajeTrend &&
+      analysis.gramajeHundredths != null &&
+      analysis.gramajeHundredths > 0
+    ) {
+      dailyValues.gramajeValues.push(analysis.gramajeHundredths);
+    }
+
+    if (shouldIncludeDefectTrend) {
+      analysis.defects.forEach((defect) => {
+        const label = formatDefectLabel(defect.name, defect.detail);
+
+        if (label === activeDefectChart) {
+          dailyValues.defectValues.push(defect.grams);
+        }
+      });
+    }
+
+    if (dailyValues.defectValues.length || dailyValues.gramajeValues.length) {
+      evolutionMap.set(analysis.analysisDate, dailyValues);
+    }
   });
 
   const evolutionData: EvolutionPoint[] = [...evolutionMap.entries()]
     .map(([date, values]) => ({
       date,
       day: date.slice(8, 10),
-      grams: values.reduce((sum, value) => sum + value, 0) / values.length,
+      defectGrams: values.defectValues.length
+        ? values.defectValues.reduce((sum, value) => sum + value, 0) /
+          values.defectValues.length
+        : null,
+      gramajeHundredths: values.gramajeValues.length
+        ? values.gramajeValues.reduce((sum, value) => sum + value, 0) /
+          values.gramajeValues.length
+        : null,
     }))
     .sort((left, right) => left.date.localeCompare(right.date));
   const activeTrendMonthIndex =
@@ -936,47 +1138,48 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     processCode: form.processCode,
     product: form.product,
   };
+  const formRelationSeeds = relationalSeeds.length
+    ? relationalSeeds
+    : buildDefectRelationalSeeds(analyses);
   const formClientOptions = getRelationalOptions(
-    analyses,
+    formRelationSeeds,
     formRelationalFilters,
     "client",
-    formRelationConfig,
+    sharedFormRelationConfig,
   );
   const formSupplierOptions = getRelationalOptions(
-    analyses,
+    formRelationSeeds,
     formRelationalFilters,
     "supplier",
-    formRelationConfig,
+    sharedFormRelationConfig,
   );
   const formProcessOptions = getRelationalOptions(
-    analyses,
+    formRelationSeeds,
     formRelationalFilters,
     "processCode",
-    formRelationConfig,
+    sharedFormRelationConfig,
   );
   const formProductOptions = getRelationalOptions(
-    analyses,
+    formRelationSeeds,
     formRelationalFilters,
     "product",
-    formRelationConfig,
+    sharedFormRelationConfig,
   );
-  const relatedAnalysesScoped = analyses.filter((analysis) => {
-    const matchesClient = !form.client || analysis.client === form.client;
-    const matchesSupplier =
-      !form.supplier || analysis.supplier === form.supplier;
+  const relatedAnalysesScoped = formRelationSeeds.filter((seed) => {
+    const matchesClient = !form.client || seed.client === form.client;
+    const matchesSupplier = !form.supplier || seed.supplier === form.supplier;
     const matchesProcess =
-      !form.processCode || analysis.processCode === form.processCode;
-    const matchesProduct = !form.product || analysis.product === form.product;
+      !form.processCode || seed.processCode === form.processCode;
+    const matchesProduct = !form.product || seed.product === form.product;
 
     return matchesClient && matchesSupplier && matchesProcess && matchesProduct;
   });
   const relatedAnalysisOptions = sortTextOptions([
-    ...relatedAnalysesScoped.map((analysis) => analysis.id),
-    ...relatedAnalysesScoped.map((analysis) => analysis.relatedAnalysis),
+    ...relatedAnalysesScoped.map((seed) => seed.analysisReference),
   ]);
   const formOutputOptions = sortTextOptions([
     ...outputStageOptions,
-    ...relatedAnalysesScoped.map((analysis) => analysis.outputStage),
+    ...relatedAnalysesScoped.map((seed) => seed.outputStage),
   ]);
   const combinedDefectOptions = sortTextOptions([
     ...defectCatalog,
@@ -985,13 +1188,25 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     ),
   ]);
   const processChartOptions = sortTextOptions(
-    analyses.map((analysis) => analysis.processCode),
+    filteredAnalyses.map((analysis) => analysis.processCode),
   );
   const processMismatchWarning = buildProcessMismatchWarning(
     analyses,
     form.client,
     form.processCode,
   );
+
+  useEffect(() => {
+    if (!activeProcessChart) {
+      return;
+    }
+
+    if (processChartOptions.includes(activeProcessChart)) {
+      return;
+    }
+
+    setActiveProcessChart("");
+  }, [activeProcessChart, processChartOptions]);
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -1006,9 +1221,9 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
         product: current.product,
       };
       const autofilledRelations = autofillUniqueRelationalSelections(
-        analyses,
+        formRelationSeeds,
         currentRelations,
-        formRelationConfig,
+        sharedFormRelationConfig,
       );
       const nextForm = {
         ...current,
@@ -1033,7 +1248,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
     });
   }, [
     isModalOpen,
-    analyses,
+    formRelationSeeds,
     form.client,
     form.supplier,
     form.processCode,
@@ -1082,10 +1297,31 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   };
 
   const handleFilterChange = (field: keyof DefectFilters, value: string) => {
-    setFilters((current) => ({
-      ...current,
-      [field]: value,
-    }));
+    setFilters((current) => {
+      if (field === "campaignId") {
+        const nextCampaignRange = getCampaignRange(campaigns, value);
+
+        return {
+          ...current,
+          campaignId: nextCampaignRange.campaignId,
+          from: nextCampaignRange.from,
+          to: nextCampaignRange.to,
+        };
+      }
+
+      if (field === "from" || field === "to") {
+        return {
+          ...current,
+          campaignId: "",
+          [field]: value,
+        };
+      }
+
+      return {
+        ...current,
+        [field]: value,
+      };
+    });
   };
 
   const handleTextFieldChange = (
@@ -1485,6 +1721,15 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
   // Panel
   return (
     <div className="module-stack">
+      <ModuleSearchToolbar
+        value={filters.search}
+        onChange={(value) => handleFilterChange("search", value)}
+        suggestions={searchSuggestions}
+        placeholder="Buscar cliente, procedencia, producto, proceso, salida, analisis, defecto o gramaje"
+        resultCount={filteredAnalyses.length}
+        totalCount={searchScopedAnalyses.length}
+      />
+
       <div className="metric-grid samples-metric-grid">
         <MetricCard
           label="Cantidad de analisis"
@@ -1531,14 +1776,16 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
               className="text-button"
               onClick={() =>
                 setFilters({
+                  campaignId: defaultCampaignRange.campaignId,
+                  search: "",
                   client: "",
                   supplier: "",
                   processCode: "",
                   product: "",
                   outputStage: "",
                   defect: "",
-                  from: "",
-                  to: "",
+                  from: defaultCampaignRange.from,
+                  to: defaultCampaignRange.to,
                 })
               }
             >
@@ -1550,6 +1797,26 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
       >
         {areFiltersVisible ? (
           <div className="samples-filters-bar defects-filters-bar">
+            <label className="samples-filter-field">
+              Campaña
+              <select
+                value={filters.campaignId}
+                onChange={(event) =>
+                  handleFilterChange("campaignId", event.target.value)
+                }
+              >
+                <option value="">Personalizada</option>
+                {campaigns.map((campaign) => (
+                  <option key={campaign.id} value={campaign.id}>
+                    {campaign.name}
+                    {campaign.id === resolvedDefaultCampaignId
+                      ? " | Predeterminada"
+                      : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <label className="samples-filter-field">
               Cliente
               <select
@@ -1898,16 +2165,32 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
         </SectionCard>
 
         <SectionCard
-          title="Evolucion de un defecto en el tiempo"
+          title="Evolucion de defectos y gramaje en el tiempo"
           action={
             <div className="defects-chart-toolbar">
+              <label className="samples-filter-field">
+                Ver
+                <select
+                  className="defects-chart-select"
+                  value={activeTrendView}
+                  onChange={(event) =>
+                    setActiveTrendView(event.target.value as TrendSeriesMode)
+                  }
+                  disabled={!activeProcessChart}
+                >
+                  <option value="defect">Defecto</option>
+                  <option value="gramaje">Gramaje</option>
+                  <option value="both">Ambos</option>
+                </select>
+              </label>
+
               <label className="samples-filter-field">
                 Defecto
                 <select
                   className="defects-chart-select"
                   value={activeDefectChart}
                   onChange={(event) => setActiveDefectChart(event.target.value)}
-                  disabled={!activeProcessChart}
+                  disabled={!activeProcessChart || activeTrendView === "gramaje"}
                 >
                   <option value="">Seleccionar</option>
                   {processDefectOptions.map((defect) => (
@@ -1927,11 +2210,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
                       getAdjacentMonthKey(availableTrendMonthKeys, current, -1),
                     )
                   }
-                  disabled={
-                    !activeProcessChart ||
-                    !activeDefectChart ||
-                    !hasPreviousTrendMonth
-                  }
+                  disabled={!activeProcessChart || !hasPreviousTrendMonth}
                   aria-label="Mes anterior"
                 >
                   <ChevronLeft size={16} />
@@ -1945,11 +2224,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
                       getAdjacentMonthKey(availableTrendMonthKeys, current, 1),
                     )
                   }
-                  disabled={
-                    !activeProcessChart ||
-                    !activeDefectChart ||
-                    !hasNextTrendMonth
-                  }
+                  disabled={!activeProcessChart || !hasNextTrendMonth}
                   aria-label="Mes siguiente"
                 >
                   <ChevronRight size={16} />
@@ -1960,7 +2235,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
         >
           <div className="chart-shell defects-chart-shell">
             {activeProcessChart ? (
-              activeDefectChart ? (
+              canRenderDefectTrend ? (
                 evolutionData.length ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
@@ -1973,32 +2248,65 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
                       />
                       <XAxis dataKey="day" stroke={chartAxisColor} />
                       <YAxis
+                        yAxisId="defect"
                         stroke={chartAxisColor}
                         tickFormatter={(value) => formatInteger(Number(value))}
+                        hide={!shouldIncludeDefectTrend}
+                      />
+                      <YAxis
+                        yAxisId="gramaje"
+                        orientation="right"
+                        stroke={chartAxisColor}
+                        tickFormatter={(value) => formatInteger(Number(value))}
+                        hide={!shouldIncludeGramajeTrend}
                       />
                       <Tooltip
                         labelFormatter={(label) => `Dia ${label}`}
-                        formatter={(value: number) => [
-                          formatGrams(value),
-                          "Promedio diario",
-                        ]}
+                        formatter={(value: number, name: string) => {
+                          if (name === "gramajeHundredths") {
+                            return [
+                              formatHundredths(Number(value)),
+                              "Gramaje promedio",
+                            ];
+                          }
+
+                          return [formatGrams(Number(value)), "Defecto promedio"];
+                        }}
                       />
-                      <Line
-                        type="monotone"
-                        dataKey="grams"
-                        stroke="var(--chart-accent-2)"
-                        strokeWidth={3}
-                        dot={{ r: 4 }}
-                        activeDot={{ r: 6 }}
-                      />
+                      {shouldIncludeDefectTrend ? (
+                        <Line
+                          yAxisId="defect"
+                          type="monotone"
+                          dataKey="defectGrams"
+                          name="defectGrams"
+                          stroke="var(--chart-accent-2)"
+                          strokeWidth={3}
+                          dot={{ r: 4 }}
+                          activeDot={{ r: 6 }}
+                          connectNulls
+                        />
+                      ) : null}
+                      {shouldIncludeGramajeTrend ? (
+                        <Line
+                          yAxisId="gramaje"
+                          type="monotone"
+                          dataKey="gramajeHundredths"
+                          name="gramajeHundredths"
+                          stroke="var(--chart-accent-4)"
+                          strokeWidth={3}
+                          dot={{ r: 4 }}
+                          activeDot={{ r: 6 }}
+                          connectNulls
+                        />
+                      ) : null}
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (
                   <div className="samples-empty-state">
                     <strong>Sin datos para este mes</strong>
                     <p>
-                      Cambia de mes o selecciona otro defecto dentro del
-                      proceso.
+                      Cambia de mes o registra mas analisis para la vista
+                      elegida.
                     </p>
                   </div>
                 )
@@ -2006,8 +2314,8 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
                 <div className="samples-empty-state">
                   <strong>Selecciona un defecto</strong>
                   <p>
-                    El listado depende del proceso elegido en el grafico
-                    anterior.
+                    Para comparar con gramaje o ver solo defectos, elige un
+                    defecto del proceso activo.
                   </p>
                 </div>
               )
@@ -2015,8 +2323,7 @@ export const DefectsModule = ({ dataMode = "live" }: DefectsModuleProps) => {
               <div className="samples-empty-state">
                 <strong>Primero selecciona un proceso</strong>
                 <p>
-                  Asi se habilita el listado de defectos vinculados a ese
-                  proceso.
+                  Asi se habilitan las series de defecto y gramaje del proceso.
                 </p>
               </div>
             )}

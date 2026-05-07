@@ -1,13 +1,17 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { LogOut, Moon, SunMedium } from "lucide-react";
+import { LogOut, Moon, Settings2, SunMedium } from "lucide-react";
 
+import { DashboardSettingsPanel } from "@/components/dashboard/dashboard-settings-panel";
 import { classNames } from "@/lib/format";
-import type { DashboardTab } from "@/types/domain";
+import type {
+  DashboardPreferences,
+  DashboardTab,
+} from "@/types/domain";
 
 gsap.registerPlugin(useGSAP);
 
@@ -27,6 +31,9 @@ interface DashboardHeaderProps {
   onToggleTheme: () => void;
   sessionLabel: string;
   onSignOut: () => void;
+  preferences: DashboardPreferences;
+  onPreferencesChange: (preferences: DashboardPreferences) => void;
+  guideDownloadHref: string;
 }
 
 // Sesion
@@ -51,8 +58,13 @@ export const DashboardHeader = ({
   onToggleTheme,
   sessionLabel,
   onSignOut,
+  preferences,
+  onPreferencesChange,
+  guideDownloadHref,
 }: DashboardHeaderProps) => {
   const containerRef = useRef<HTMLElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const activeTabConfig = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
   const activeTabIndex = Math.max(
     tabs.findIndex((tab) => tab.id === activeTab),
@@ -60,6 +72,25 @@ export const DashboardHeader = ({
   );
   const ThemeIcon = themeMode === "dark" ? SunMedium : Moon;
   const sessionInitials = getSessionInitials(sessionLabel);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+
+      if (
+        !settingsRef.current?.contains(target) &&
+        !target?.closest("[data-dashboard-settings-trigger='true']")
+      ) {
+        setIsSettingsOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, []);
 
   // Acciones
   const renderSessionActions = ({
@@ -87,6 +118,18 @@ export const DashboardHeader = ({
       >
         <ThemeIcon size={15} strokeWidth={1.9} />
         <span>{themeMode === "dark" ? "Tema" : "Tema"}</span>
+      </button>
+
+      <button
+        type="button"
+        className="dashboard-console__theme-toggle"
+        onClick={() => setIsSettingsOpen((current) => !current)}
+        aria-expanded={isSettingsOpen}
+        aria-label="Abrir opciones del dashboard"
+        data-dashboard-settings-trigger="true"
+      >
+        <Settings2 size={15} strokeWidth={1.9} />
+        <span>Opciones</span>
       </button>
 
       {includeAvatar ? (
@@ -210,6 +253,20 @@ export const DashboardHeader = ({
             includeAvatar: false,
           })}
         </details>
+      </div>
+
+      <div
+        ref={settingsRef}
+        className={classNames(
+          "dashboard-console__settings-panel",
+          isSettingsOpen && "is-open",
+        )}
+      >
+        <DashboardSettingsPanel
+          preferences={preferences}
+          onChange={onPreferencesChange}
+          guideDownloadHref={guideDownloadHref}
+        />
       </div>
 
       <div className="dashboard-console__deck">

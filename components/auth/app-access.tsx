@@ -312,6 +312,7 @@ export const AppAccess = ({ turnstileSiteKey }: AppAccessProps) => {
     return (
       <DashboardApp
         key={`demo-${sessionUser.uid}`}
+        sessionUid={sessionUser.uid}
         sessionName={sessionUser.displayName}
         sessionEmail={sessionUser.email}
         sessionWarning="Estás usando el dashboard en modo 'demo'. Puedes crear, editar, eliminar y exportar registros de ejemplo, pero nada se guarda y todos los cambios se pierden al recargar."
@@ -335,6 +336,7 @@ export const AppAccess = ({ turnstileSiteKey }: AppAccessProps) => {
   return (
     <DashboardApp
       key={`full-${sessionUser.uid}`}
+      sessionUid={sessionUser.uid}
       sessionName={sessionUser.displayName}
       sessionEmail={sessionUser.email}
       sessionWarning={sessionWarning}

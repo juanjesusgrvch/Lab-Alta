@@ -1,6 +1,32 @@
 // Navegacion
 export type DashboardTab = "defects" | "natural" | "samples";
 
+export interface DashboardCampaign {
+  id: string;
+  name: string;
+  from: string;
+  to: string;
+}
+
+export interface DashboardPreferences {
+  campaigns: DashboardCampaign[];
+  defaultCampaignId: string;
+}
+
+export interface DashboardRelationalSeed {
+  source: DashboardTab;
+  client: string;
+  supplier: string;
+  product: string;
+  processCode: string;
+  analysisReference: string;
+  outputStage: string;
+  warehouseZone: string;
+  shelf: string;
+  sampleCode: string;
+  gramajeHundredths: number | null;
+}
+
 // Defectos
 export interface DefectItem {
   id: string;

@@ -41,6 +41,38 @@ const prepareClonedPdfLayout = (
     clonedExportRoot.style.maxWidth = "none";
     clonedExportRoot.style.visibility = "visible";
     clonedExportRoot.style.opacity = "1";
+
+    clonedExportRoot
+      .querySelectorAll<HTMLCanvasElement>("canvas")
+      .forEach((canvas) => {
+        if (canvas.width <= 0 || canvas.height <= 0) {
+          canvas.remove();
+        }
+      });
+
+    const sanitizingStyle = clonedDocument.createElement("style");
+    sanitizingStyle.textContent = `
+      [data-pdf-export='true'],
+      [data-pdf-export='true'] * {
+        mask-image: none !important;
+        -webkit-mask-image: none !important;
+        backdrop-filter: none !important;
+      }
+
+      [data-pdf-page='true'],
+      [data-pdf-page='true'] *,
+      [data-pdf-page='true'] *::before,
+      [data-pdf-page='true'] *::after {
+        background-image: none !important;
+      }
+
+      [data-pdf-page='true'] *::before,
+      [data-pdf-page='true'] *::after {
+        mask-image: none !important;
+        -webkit-mask-image: none !important;
+      }
+    `;
+    clonedDocument.head?.appendChild(sanitizingStyle);
   }
 
   clonedDocument
